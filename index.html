@@ -131,6 +131,34 @@
   .stage-cell:hover{outline:2px solid var(--ink);outline-offset:1px;}
   .add-material-row{padding:10px;border-top:1px dashed var(--line);}
 
+  /* ---------- Schedule chart ---------- */
+  .sched-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:var(--radius);background:#fff;position:relative;}
+  .sched-grid{position:relative;}
+  .sched-header{display:flex;border-bottom:1px solid var(--line);background:#faf8f4;position:sticky;top:0;z-index:5;}
+  .sched-label-col{width:220px;min-width:220px;flex-shrink:0;padding:8px 10px;font-size:11px;font-weight:700;
+    text-transform:uppercase;letter-spacing:.03em;color:var(--ink-soft);border-right:1px solid var(--line);
+    position:sticky;left:0;background:#faf8f4;z-index:6;}
+  .sched-timeline-head{position:relative;height:32px;}
+  .sched-tick{position:absolute;top:0;bottom:0;border-left:1px solid var(--line);font-size:10px;color:var(--ink-soft);
+    padding:6px 0 0 4px;white-space:nowrap;}
+  .sched-space-group{border-bottom:1px solid var(--line);}
+  .sched-space-title{padding:6px 10px;font-size:11.5px;font-weight:700;color:var(--accent-dark);background:#fbf9f5;
+    position:sticky;left:0;width:220px;}
+  .sched-row{display:flex;align-items:center;min-height:38px;border-top:1px solid #f0ede6;}
+  .sched-row-label{width:220px;min-width:220px;flex-shrink:0;padding:6px 10px;font-size:12.5px;position:sticky;left:0;
+    background:#fff;border-right:1px solid var(--line);z-index:4;}
+  .sched-row-timeline{position:relative;flex:1;height:38px;}
+  .sched-bar{position:absolute;top:6px;height:26px;border-radius:6px;cursor:grab;display:flex;align-items:center;
+    padding:0 8px;font-size:11px;font-weight:600;color:#fff;white-space:nowrap;overflow:hidden;user-select:none;}
+  .sched-bar.Done{background:var(--done);}
+  .sched-bar.In-Progress{background:var(--progress);}
+  .sched-bar.Delayed{background:var(--delayed);}
+  .sched-bar.Not-Started{background:var(--notstarted);}
+  .sched-bar:active{cursor:grabbing;}
+  .sched-resize{position:absolute;right:0;top:0;bottom:0;width:8px;cursor:ew-resize;}
+  .sched-svg{position:absolute;top:0;left:0;pointer-events:none;z-index:2;}
+  .sched-today{position:absolute;top:0;bottom:0;width:2px;background:var(--accent);opacity:.5;z-index:3;}
+
   /* ---------- Buttons ---------- */
   .btn{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:7px;border:1px solid var(--line);
     background:#fff;color:var(--ink);font-size:13px;font-weight:600;}
@@ -242,7 +270,12 @@ var STATE = {
 
 var STATUS_LIST = ['Not Started','In Progress','Done','Delayed','N/A'];
 function cls(status){ return String(status).replace(/\//g,'-').replace(/\s+/g,'-'); }
-function todayISO(){ var d=new Date(); return d.toISOString().slice(0,10); }
+function todayISO(){
+  // Local calendar date, not UTC — toISOString() would report the wrong date
+  // for part of the day in any positive-UTC-offset timezone (e.g. IST).
+  var d = new Date();
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
 function fmtDate(iso){
   if(!iso) return '&mdash;';
   var d = new Date(iso);
@@ -431,7 +464,7 @@ function renderBelowBar(){
 function tabsForRole(){
   if(STATE.role==='engineer') return [['tracker','Tracker'],['daily','Daily Log']];
   if(STATE.role==='client') return [['client','Overview']];
-  return [['review','Progress Review'],['planning','Planning'],['cashflow','Cash Flow'],
+  return [['review','Progress Review'],['planning','Planning'],['schedule','Schedule'],['cashflow','Cash Flow'],
     ['daily','Daily Tracking'],['report','Progress Report'],['manage','Manage']];
 }
 function setTab(t){ STATE.currentTab = t; render(); }
@@ -481,6 +514,7 @@ function renderProjectContent(){
     case 'tracker': el.innerHTML = renderTrackerView(true); break;
     case 'review': el.innerHTML = renderReviewView(); break;
     case 'planning': el.innerHTML = renderTrackerView(false); break;
+    case 'schedule': el.innerHTML = renderScheduleView(); attachScheduleHandlers(); break;
     case 'cashflow': el.innerHTML = renderCashflowView(); break;
     case 'daily': el.innerHTML = renderDailyView(); attachDailyHandlers(); break;
     case 'report': el.innerHTML = renderReportView(); break;
@@ -689,6 +723,200 @@ function saveAddMaterial(spaceId){
   if(!qty){ toast('Enter a quantity'); return; }
   apiPost('addBoqItem', { projectId: STATE.currentProjectId, spaceId: spaceId, materialId: materialId, quantity: qty }).then(function(){
     closeModal(); toast('Added to BOQ'); refresh();
+  }).catch(showErr);
+}
+
+// ============================= SCHEDULE / PERT CHART =============================
+var SCHED_PX_PER_DAY = 28;
+function activitiesOf(projectId){
+  return STATE.data.activities.filter(function(a){ return a.ProjectID===projectId; });
+}
+// Parse and arithmetic done entirely in UTC (not local time) so day-math is
+// correct regardless of the browser's timezone offset — a date-only string
+// parsed with a local-time suffix + re-serialized via toISOString() (which is
+// always UTC) silently shifts by a day for any positive-UTC-offset timezone
+// (e.g. IST) if local getDate()/setDate() are mixed in instead of their UTC
+// counterparts.
+function parseISODate(s){ return new Date(s+'T00:00:00Z'); }
+function dayDiff(fromIso, toIso){ return Math.round((parseISODate(toIso)-parseISODate(fromIso))/86400000); }
+function addDaysISO(iso, n){
+  var d = parseISODate(iso);
+  d.setUTCDate(d.getUTCDate()+n);
+  return d.toISOString().slice(0,10);
+}
+function renderScheduleView(){
+  var pid = STATE.currentProjectId;
+  var acts = activitiesOf(pid);
+  var spaces = spacesOf(pid);
+  if(!acts.length){
+    return '<div class="empty-state">No schedule activities yet &mdash; add materials to a space in the Planning tab and an activity bar will appear here automatically for each trade involved.</div>';
+  }
+  var starts = acts.map(function(a){return a.StartDate;}).sort();
+  var ends = acts.map(function(a){return a.EndDate;}).sort();
+  var rangeStart = addDaysISO(starts[0], -3);
+  var rangeEnd = addDaysISO(ends[ends.length-1], 3);
+  var totalDays = dayDiff(rangeStart, rangeEnd);
+  var timelineWidth = totalDays*SCHED_PX_PER_DAY;
+
+  var header = '<div class="sched-header"><div class="sched-label-col">Space / Agency</div>'+
+    '<div class="sched-timeline-head" style="width:'+timelineWidth+'px;">';
+  for(var d=0; d<totalDays; d+=7){
+    header += '<div class="sched-tick" style="left:'+(d*SCHED_PX_PER_DAY)+'px;">'+fmtDate(addDaysISO(rangeStart,d))+'</div>';
+  }
+  var todayOffset = dayDiff(rangeStart, todayISO());
+  header += '</div></div>';
+
+  var body = '';
+  spaces.forEach(function(sp){
+    var rows = acts.filter(function(a){ return a.SpaceID===sp.SpaceID; });
+    if(!rows.length) return;
+    body += '<div class="sched-space-group"><div class="sched-space-title">'+escapeHtml(sp.Name)+'</div>';
+    rows.forEach(function(a){
+      var left = dayDiff(rangeStart, a.StartDate)*SCHED_PX_PER_DAY;
+      var width = Math.max(dayDiff(a.StartDate, a.EndDate)*SCHED_PX_PER_DAY, 20);
+      body += '<div class="sched-row">'+
+        '<div class="sched-row-label">'+escapeHtml(a.Agency)+'<div style="font-size:10.5px;color:var(--ink-soft);">'+fmtDate(a.StartDate)+' &rarr; '+fmtDate(a.EndDate)+'</div></div>'+
+        '<div class="sched-row-timeline" style="width:'+timelineWidth+'px;">'+
+          '<div class="sched-bar '+cls(a.Status)+'" data-activity-id="'+a.ActivityID+'" style="left:'+left+'px;width:'+width+'px;" title="'+escapeHtml(a.Agency+': '+a.Status)+'">'+
+            escapeHtml(a.Agency)+
+            '<div class="sched-resize" data-activity-id="'+a.ActivityID+'"></div>'+
+          '</div>'+
+        '</div></div>';
+    });
+    body += '</div>';
+  });
+
+  return '<div class="field-hint" style="margin-bottom:10px;">Drag a bar to reschedule, drag its right edge to change duration, click it to edit status / dependencies. Dependent activities shift automatically.</div>'+
+    '<div class="sched-wrap"><div class="sched-grid" id="schedGrid">'+
+    header + body +
+    '<div class="sched-today" style="left:'+(220+todayOffset*SCHED_PX_PER_DAY)+'px;top:0;bottom:0;" title="Today"></div>'+
+    '<svg class="sched-svg" id="schedSvg"></svg>'+
+    '</div></div>';
+}
+
+function attachScheduleHandlers(){
+  var grid = document.getElementById('schedGrid');
+  if(!grid) return;
+  drawDependencyLines();
+  grid.querySelectorAll('.sched-bar').forEach(function(bar){
+    bar.addEventListener('mousedown', function(e){
+      if(e.target.classList.contains('sched-resize')) return;
+      startBarDrag(e, bar, 'move');
+    });
+  });
+  grid.querySelectorAll('.sched-resize').forEach(function(handle){
+    handle.addEventListener('mousedown', function(e){
+      e.stopPropagation();
+      var bar = handle.closest('.sched-bar');
+      startBarDrag(e, bar, 'resize');
+    });
+  });
+}
+function drawDependencyLines(){
+  var grid = document.getElementById('schedGrid');
+  var svg = document.getElementById('schedSvg');
+  if(!grid || !svg) return;
+  var gridRect = grid.getBoundingClientRect();
+  svg.setAttribute('width', grid.scrollWidth);
+  svg.setAttribute('height', grid.scrollHeight);
+  var lines = '';
+  var acts = activitiesOf(STATE.currentProjectId);
+  acts.forEach(function(a){
+    (a.Predecessors||[]).forEach(function(predId){
+      var predEl = grid.querySelector('.sched-bar[data-activity-id="'+predId+'"]');
+      var succEl = grid.querySelector('.sched-bar[data-activity-id="'+a.ActivityID+'"]');
+      if(!predEl || !succEl) return;
+      var pr = predEl.getBoundingClientRect(), sr = succEl.getBoundingClientRect();
+      var x1 = pr.right - gridRect.left, y1 = pr.top + pr.height/2 - gridRect.top;
+      var x2 = sr.left - gridRect.left, y2 = sr.top + sr.height/2 - gridRect.top;
+      lines += '<path d="M'+x1+','+y1+' C'+(x1+20)+','+y1+' '+(x2-20)+','+y2+' '+x2+','+y2+'" stroke="var(--ink-soft)" stroke-width="1.5" fill="none" marker-end="url(#schedArrow)"/>';
+    });
+  });
+  svg.innerHTML = '<defs><marker id="schedArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 z" fill="var(--ink-soft)"/></marker></defs>'+lines;
+}
+
+function startBarDrag(e, barEl, mode){
+  e.preventDefault();
+  var activityId = barEl.getAttribute('data-activity-id');
+  var act = STATE.data.activities.filter(function(a){return a.ActivityID===activityId;})[0];
+  var startX = e.clientX;
+  var origLeft = parseInt(barEl.style.left, 10);
+  var origWidth = parseInt(barEl.style.width, 10);
+  var moved = false;
+
+  function onMove(ev){
+    var dx = ev.clientX - startX;
+    if(Math.abs(dx) > 3) moved = true;
+    if(mode==='move'){
+      barEl.style.left = (origLeft + dx) + 'px';
+    } else {
+      barEl.style.width = Math.max(origWidth + dx, SCHED_PX_PER_DAY) + 'px';
+    }
+  }
+  function onUp(ev){
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+    if(!moved){
+      openActivityModal(activityId);
+      return;
+    }
+    var dx = ev.clientX - startX;
+    var deltaDays = Math.round(dx / SCHED_PX_PER_DAY);
+    var payload = { activityId: activityId };
+    if(mode==='move'){
+      payload.startDate = addDaysISO(act.StartDate, deltaDays);
+      payload.endDate = addDaysISO(act.EndDate, deltaDays);
+    } else {
+      var newWidthDays = Math.max(Math.round((origWidth+dx)/SCHED_PX_PER_DAY), 1);
+      payload.endDate = addDaysISO(act.StartDate, newWidthDays);
+    }
+    apiPost('updateActivity', payload).then(function(){
+      toast('Schedule updated'); refresh();
+    }).catch(function(err){ showErr(err); refresh(); });
+  }
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+}
+
+function openActivityModal(activityId){
+  var act = STATE.data.activities.filter(function(a){return a.ActivityID===activityId;})[0];
+  var sp = STATE.data.spaces.filter(function(s){return s.SpaceID===act.SpaceID;})[0];
+  var others = activitiesOf(STATE.currentProjectId).filter(function(a){return a.ActivityID!==activityId;});
+  var preds = act.Predecessors||[];
+  var body = '<h3>'+escapeHtml(act.Agency)+' &mdash; '+escapeHtml(sp?sp.Name:'')+'</h3>'+
+    '<div class="field"><label>Status</label><select id="act-status">'+
+      ['Not Started','In Progress','Done','Delayed'].map(function(s){return '<option value="'+s+'" '+(act.Status===s?'selected':'')+'>'+s+'</option>';}).join('')+
+    '</select></div>'+
+    '<div class="field-row">'+
+      '<div class="field"><label>Start Date</label><input type="date" id="act-start" value="'+act.StartDate+'"></div>'+
+      '<div class="field"><label>End Date</label><input type="date" id="act-end" value="'+act.EndDate+'"></div>'+
+    '</div>'+
+    '<div class="field"><label>Notes</label><textarea id="act-notes">'+escapeHtml(act.Notes||'')+'</textarea></div>'+
+    '<div class="field"><label>Depends on (must finish before this can start)</label>'+
+    (others.length ? others.map(function(o){
+      var osp = STATE.data.spaces.filter(function(s){return s.SpaceID===o.SpaceID;})[0];
+      return '<label style="display:flex;align-items:center;gap:7px;margin:4px 0;font-weight:400;font-size:13px;">'+
+        '<input type="checkbox" class="act-dep-cb" value="'+o.ActivityID+'" style="width:auto;" '+(preds.indexOf(o.ActivityID)>-1?'checked':'')+'> '+
+        escapeHtml((osp?osp.Name:'')+' — '+o.Agency)+'</label>';
+    }).join('') : '<div class="field-hint">No other activities in this project yet.</div>')+
+    '</div>'+
+    '<div class="modal-actions"><button class="btn" onclick="closeModal()">Cancel</button>'+
+    '<button class="btn primary" onclick="saveActivity(\''+activityId+'\')">Save</button></div>';
+  showModal(body);
+}
+function saveActivity(activityId){
+  var payload = {
+    activityId: activityId,
+    status: document.getElementById('act-status').value,
+    startDate: document.getElementById('act-start').value,
+    endDate: document.getElementById('act-end').value,
+    notes: document.getElementById('act-notes').value
+  };
+  var deps = Array.from(document.querySelectorAll('.act-dep-cb:checked')).map(function(cb){return cb.value;});
+  apiPost('updateActivity', payload).then(function(){
+    return apiPost('setActivityDependencies', { activityId: activityId, predecessors: deps });
+  }).then(function(){
+    closeModal(); toast('Activity updated'); refresh();
   }).catch(showErr);
 }
 

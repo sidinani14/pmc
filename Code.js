@@ -304,7 +304,11 @@ var TABS = {
       'PaymentStatus', 'StagesJSON', 'RollupStatus', 'Notes', 'CreatedAt', 'UpdatedAt'
     ]
   },
-  DAILY_LOG: { name: 'DAILY_LOG', headers: ['LogID', 'Date', 'ProjectID', 'SpaceID', 'Entry', 'LoggedBy', 'HasBlocker', 'CreatedAt'] }
+  DAILY_LOG: { name: 'DAILY_LOG', headers: ['LogID', 'Date', 'ProjectID', 'SpaceID', 'Entry', 'LoggedBy', 'HasBlocker', 'CreatedAt'] },
+  SCHEDULE_ACTIVITIES: {
+    name: 'SCHEDULE_ACTIVITIES',
+    headers: ['ActivityID', 'ProjectID', 'SpaceID', 'Agency', 'StartDate', 'EndDate', 'Status', 'PredecessorsJSON', 'Notes', 'CreatedAt', 'UpdatedAt']
+  }
 };
 
 // ---------- Sheet plumbing ----------
@@ -381,6 +385,11 @@ function daysAgoISO_(n) {
   return Utilities.formatDate(d, 'Asia/Kolkata', 'yyyy-MM-dd');
 }
 function daysFromNowISO_(n) { return daysAgoISO_(-n); }
+function dayDiffFromToday_(iso) {
+  var today = new Date(Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd') + 'T00:00:00');
+  var d = new Date(iso + 'T00:00:00');
+  return Math.round((today - d) / 86400000);
+}
 
 // ---------- One-time setup ----------
 
@@ -426,6 +435,8 @@ function migrateToBoq() {
   if (matSheet.getLastRow() > 1) matSheet.deleteRows(2, matSheet.getLastRow() - 1);
   var boqSheet = getTab_(ss, 'BOQ_ITEMS');
   if (boqSheet.getLastRow() > 1) boqSheet.deleteRows(2, boqSheet.getLastRow() - 1);
+  var actSheet = getTab_(ss, 'SCHEDULE_ACTIVITIES');
+  if (actSheet.getLastRow() > 1) actSheet.deleteRows(2, actSheet.getLastRow() - 1);
 
   seedMaterialsIfEmpty_(ss);
   seedDemoProject_(ss);
@@ -470,6 +481,7 @@ function seedDemoProject_(ss) {
   });
 
   var counters = {};
+  var groups = {}; // '<spaceId>|<agency>' -> { installTargets:[], installStatuses:[] }
   DEMO_BOQ_ITEMS.forEach(function (item) {
     var spaceId = spaceIds[item.space];
     if (!spaceId) return;
@@ -488,6 +500,34 @@ function seedDemoProject_(ss) {
       daysFromNowISO_(14), mode === 'ahead' ? 'Partial' : 'Pending',
       JSON.stringify(stages), rollup, '', now, now
     ]);
+
+    var groupKey = spaceId + '|' + item.agency;
+    var install = stages.filter(function (s) { return s.stage === 'Installation'; })[0];
+    var designFreeze = stages.filter(function (s) { return s.stage === 'Design Freeze'; })[0];
+    groups[groupKey] = groups[groupKey] || { spaceId: spaceId, agency: item.agency, installTargets: [], statuses: [], startTargets: [] };
+    groups[groupKey].installTargets.push(install.target);
+    groups[groupKey].startTargets.push(designFreeze.target);
+    groups[groupKey].statuses.push(install.status);
+  });
+
+  var actSheet = getTab_(ss, 'SCHEDULE_ACTIVITIES');
+  var spaceGroupCounters = {};
+  Object.keys(groups).forEach(function (key) {
+    var g = groups[key];
+    // Every demo BOQ line shares the same stage-target dates (buildDemoStages_
+    // keys them by stage index only), so groups collapse to identical dates —
+    // stagger per space so the chart shows a realistic cascading sequence.
+    spaceGroupCounters[g.spaceId] = (spaceGroupCounters[g.spaceId] || 0);
+    var offset = spaceGroupCounters[g.spaceId] * 4;
+    spaceGroupCounters[g.spaceId]++;
+    var startDate = daysAgoISO_(dayDiffFromToday_(g.startTargets.sort()[0]) - offset);
+    var endDate = daysAgoISO_(dayDiffFromToday_(g.installTargets.sort().slice(-1)[0]) - offset);
+    var status = 'Not Started';
+    if (g.statuses.every(function (s) { return s === 'Done'; })) status = 'Done';
+    else if (g.statuses.indexOf('Delayed') > -1) status = 'Delayed';
+    else if (g.statuses.some(function (s) { return s === 'In Progress' || s === 'Done'; })) status = 'In Progress';
+    var activityId = 'ACT-' + Utilities.getUuid().slice(0, 6);
+    actSheet.appendRow([activityId, projectId, g.spaceId, g.agency, startDate, endDate, status, '[]', '', now, now]);
   });
 
   var engineers = ['Deepak Soni', 'Achal Rathore'];
@@ -568,7 +608,8 @@ function doPost(e) {
     addProject: addProject, updateProject: updateProject, addSpace: addSpace,
     addMaterial: addMaterial, updateMaterial: updateMaterial,
     addBoqItem: addBoqItem, updateBoqItem: updateBoqItem,
-    updateStage: updateStage, addDailyLog: addDailyLog
+    updateStage: updateStage, addDailyLog: addDailyLog,
+    updateActivity: updateActivity, setActivityDependencies: setActivityDependencies
   };
   var fn = routes[data.action];
   if (!fn) return respond_({ ok: false, error: 'Unknown action: ' + data.action });
@@ -611,6 +652,13 @@ function getAllData() {
   });
   dailyLog.sort(function (a, b) { return new Date(b.Date) - new Date(a.Date) || new Date(b.CreatedAt) - new Date(a.CreatedAt); });
 
+  var activities = rowsToObjects_(getTab_(ss, 'SCHEDULE_ACTIVITIES')).map(function (r) {
+    r.StartDate = normDate_(r.StartDate);
+    r.EndDate = normDate_(r.EndDate);
+    r.Predecessors = JSON.parse(r.PredecessorsJSON || '[]');
+    return r;
+  });
+
   var categories = (function () {
     var seen = {}, out = [];
     materialsConfig.forEach(function (m) { if (!seen[m.Category]) { seen[m.Category] = true; out.push(m.Category); } });
@@ -623,7 +671,8 @@ function getAllData() {
     spaces: spaces,
     materialsConfig: materialsConfig,
     boqItems: boqItems,
-    dailyLog: dailyLog
+    dailyLog: dailyLog,
+    activities: activities
   };
 }
 
@@ -735,7 +784,145 @@ function addBoqItem(payload) {
     material.Unit, qty, rate, amount, JSON.stringify(DEFAULT_SPLIT), 0, 0, '', 'Pending',
     JSON.stringify(stages), 'Not Started', '', now, now
   ]);
+  ensureActivityForBoqItem_(ss, payload.projectId, payload.spaceId, material.Agency);
   return { boqItemId: boqItemId };
+}
+
+// ---------- Schedule / PERT activities ----------
+
+function ensureActivityForBoqItem_(ss, projectId, spaceId, agency) {
+  var sheet = getTab_(ss, 'SCHEDULE_ACTIVITIES');
+  var existing = rowsToObjects_(sheet).filter(function (a) {
+    return a.ProjectID === projectId && a.SpaceID === spaceId && a.Agency === agency;
+  })[0];
+  if (existing) return existing.ActivityID;
+  var activityId = 'ACT-' + Utilities.getUuid().slice(0, 6);
+  var now = new Date();
+  sheet.appendRow([
+    activityId, projectId, spaceId, agency, daysFromNowISO_(0), daysFromNowISO_(7),
+    'Not Started', '[]', '', now, now
+  ]);
+  return activityId;
+}
+
+function updateActivity(payload) {
+  // payload: { activityId, startDate?, endDate?, status?, notes? }
+  var ss = getSS_();
+  var sheet = getTab_(ss, 'SCHEDULE_ACTIVITIES');
+  var row = findRowById_(sheet, 'ActivityID', payload.activityId);
+  if (row < 0) throw new Error('Activity not found');
+  var headers = sheet.getDataRange().getValues()[0];
+  var idx = {};
+  headers.forEach(function (h, i) { idx[h] = i; });
+  var current = sheet.getRange(row, 1, 1, headers.length).getValues()[0];
+
+  if (payload.startDate !== undefined) current[idx.StartDate] = payload.startDate;
+  if (payload.endDate !== undefined) current[idx.EndDate] = payload.endDate;
+  if (payload.status !== undefined) current[idx.Status] = payload.status;
+  if (payload.notes !== undefined) current[idx.Notes] = payload.notes;
+  current[idx.UpdatedAt] = new Date();
+  sheet.getRange(row, 1, 1, headers.length).setValues([current]);
+
+  if (payload.status === 'Done') {
+    markInstallationDone_(ss, current[idx.ProjectID], current[idx.SpaceID], current[idx.Agency], current[idx.EndDate]);
+  }
+  cascadeFromActivity_(ss, payload.activityId);
+  return { ok: true };
+}
+
+function setActivityDependencies(payload) {
+  // payload: { activityId, predecessors: [ActivityID, ...] }
+  var ss = getSS_();
+  var sheet = getTab_(ss, 'SCHEDULE_ACTIVITIES');
+  var row = findRowById_(sheet, 'ActivityID', payload.activityId);
+  if (row < 0) throw new Error('Activity not found');
+  var headers = sheet.getDataRange().getValues()[0];
+  var predColIdx = headers.indexOf('PredecessorsJSON');
+  var updatedColIdx = headers.indexOf('UpdatedAt');
+  var predecessors = (payload.predecessors || []).filter(function (id) { return id !== payload.activityId; });
+  sheet.getRange(row, predColIdx + 1).setValue(JSON.stringify(predecessors));
+  sheet.getRange(row, updatedColIdx + 1).setValue(new Date());
+
+  predecessors.forEach(function (predId) { cascadeFromActivity_(ss, predId); });
+  return { ok: true };
+}
+
+function markInstallationDone_(ss, projectId, spaceId, agency, endDate) {
+  var sheet = getTab_(ss, 'BOQ_ITEMS');
+  var headers = sheet.getDataRange().getValues()[0];
+  var stagesColIdx = headers.indexOf('StagesJSON');
+  var rollupColIdx = headers.indexOf('RollupStatus');
+  var rows = rowsToObjects_(sheet).filter(function (r) {
+    return r.ProjectID === projectId && r.SpaceID === spaceId && r.Agency === agency;
+  });
+  rows.forEach(function (r) {
+    var stages = JSON.parse(r.StagesJSON || '[]');
+    var installStage = stages.filter(function (s) { return s.stage === 'Installation'; })[0];
+    if (!installStage) return;
+    installStage.status = 'Done';
+    installStage.actual = normDate_(endDate) || endDate;
+    var rollup = computeRollup_(stages);
+    sheet.getRange(r._row, stagesColIdx + 1).setValue(JSON.stringify(stages));
+    sheet.getRange(r._row, rollupColIdx + 1).setValue(rollup);
+  });
+}
+
+function syncBoqDueDates_(ss, projectId, spaceId, agency, dueDate) {
+  var sheet = getTab_(ss, 'BOQ_ITEMS');
+  var headers = sheet.getDataRange().getValues()[0];
+  var dueColIdx = headers.indexOf('DueDate');
+  var rows = rowsToObjects_(sheet).filter(function (r) {
+    return r.ProjectID === projectId && r.SpaceID === spaceId && r.Agency === agency;
+  });
+  rows.forEach(function (r) {
+    sheet.getRange(r._row, dueColIdx + 1).setValue(dueDate);
+  });
+}
+
+// Finish-to-start cascade: any activity that lists `activityId` as a predecessor
+// must start no earlier than that predecessor's end. If violated, shift the
+// dependent forward (preserving its own duration) and recurse into its own
+// dependents. `visited` guards against an accidental cycle.
+function cascadeFromActivity_(ss, activityId, visited) {
+  visited = visited || {};
+  if (visited[activityId]) return;
+  visited[activityId] = true;
+
+  var sheet = getTab_(ss, 'SCHEDULE_ACTIVITIES');
+  var all = rowsToObjects_(sheet);
+  var predecessor = all.filter(function (a) { return a.ActivityID === activityId; })[0];
+  if (!predecessor) return;
+  var predEnd = normDate_(predecessor.EndDate) || predecessor.EndDate;
+
+  var headers = sheet.getDataRange().getValues()[0];
+  var idx = {};
+  headers.forEach(function (h, i) { idx[h] = i; });
+
+  all.forEach(function (successor) {
+    var preds = JSON.parse(successor.PredecessorsJSON || '[]');
+    if (preds.indexOf(activityId) === -1) return;
+    var succStart = normDate_(successor.StartDate) || successor.StartDate;
+    if (succStart >= predEnd) return; // already satisfied
+
+    var deltaMs = new Date(predEnd) - new Date(succStart);
+    var newStart = shiftDateISO_(successor.StartDate, deltaMs);
+    var newEnd = shiftDateISO_(successor.EndDate, deltaMs);
+
+    var current = sheet.getRange(successor._row, 1, 1, headers.length).getValues()[0];
+    current[idx.StartDate] = newStart;
+    current[idx.EndDate] = newEnd;
+    current[idx.UpdatedAt] = new Date();
+    sheet.getRange(successor._row, 1, 1, headers.length).setValues([current]);
+
+    syncBoqDueDates_(ss, successor.ProjectID, successor.SpaceID, successor.Agency, newEnd);
+    cascadeFromActivity_(ss, successor.ActivityID, visited);
+  });
+}
+
+function shiftDateISO_(iso, deltaMs) {
+  var d = new Date(iso);
+  d.setTime(d.getTime() + deltaMs);
+  return Utilities.formatDate(d, 'Asia/Kolkata', 'yyyy-MM-dd');
 }
 
 function updateBoqItem(payload) {
