@@ -7,36 +7,234 @@
 
 var STAGES = ['Design Freeze', 'BOQ', 'Selection', 'Order Placement', 'Delivery', 'Installation'];
 
-var SUBITEMS = [
-  { category: 'Flooring', subItem: 'Flooring' },
-  { category: 'False Ceiling', subItem: 'False Ceiling' },
-  { category: 'Wall Panelling', subItem: 'Carpentry' },
-  { category: 'Wall Panelling', subItem: 'Stone Work' },
-  { category: 'Wall Panelling', subItem: 'Paint' },
-  { category: 'Loose Furniture', subItem: 'Loose Furniture' },
-  { category: 'Lighting', subItem: 'Lighting' },
-  { category: 'Electrical', subItem: 'Conduiting' },
-  { category: 'Electrical', subItem: 'Wiring' },
-  { category: 'Electrical', subItem: 'Switch & Sockets' },
-  { category: 'Electrical', subItem: 'Appliances' },
-  { category: 'Air Conditioning', subItem: 'Copper Piping' },
-  { category: 'Air Conditioning', subItem: 'Drain Channel' },
-  { category: 'Air Conditioning', subItem: 'Machine Installation' },
-  { category: 'Plumbing', subItem: 'Piping & Concealed Fittings' },
-  { category: 'Plumbing', subItem: 'Sanitary Ware' },
-  { category: 'Automation', subItem: 'Internal Wiring' },
-  { category: 'Automation', subItem: 'Machine Installation' }
+// Execution trades — mirrors the user's real "Legends" tab (Rate List agency column).
+var AGENCIES = [
+  'Carpentry', 'Flooring', 'Plumbing', 'Painting', 'False Ceiling', 'Fabrication',
+  'Windows', 'Electrical', 'Air Conditioning', 'Automation', 'Furnishing',
+  'Acoustics', 'Decor', 'Glass work', 'Modular Furniture', 'Sliding profile door'
 ];
-
-var CATEGORIES = (function () {
-  var seen = {}, out = [];
-  SUBITEMS.forEach(function (s) { if (!seen[s.category]) { seen[s.category] = true; out.push(s.category); } });
-  return out;
-})();
 
 var DEFAULT_SPLIT = { 'Order Placement': 40, 'Delivery': 40, 'Installation': 20 };
 
 var SHEET_PROP_KEY = 'PMC_SHEET_ID';
+
+// ---------- Materials catalog seed ----------
+// Extracted from the user's real "NAGAR HOUSE Interior Estimate.xlsx" (Rate List
+// tab, 2026-07-28) — real materials, units and rates, not placeholders. Agency
+// per Rate-List category, per the approved plan (editable afterwards in the UI).
+var MATERIALS_SEED = [
+  { category: 'CARPENTRY', name: '12mm Ply', unit: 'Sq. Ft', rate: 50, agency: 'Carpentry' },
+  { category: 'CARPENTRY', name: '19mm Ply', unit: 'Sq. Ft', rate: 80, agency: 'Carpentry' },
+  { category: 'CARPENTRY', name: '12mm HDHMR', unit: 'Sq. Ft', rate: 60, agency: 'Carpentry' },
+  { category: 'CARPENTRY', name: '19mm HDHMR', unit: 'Sq. Ft', rate: 100, agency: 'Carpentry' },
+  { category: 'CARPENTRY', name: '19mm Plyboard/ Flush Door', unit: 'Sq. Ft', rate: 120, agency: 'Carpentry' },
+  { category: 'CARPENTRY', name: '12mm Ply with 4mm hdhmr', unit: 'Sq. Ft', rate: 120, agency: 'Carpentry' },
+  { category: 'CARPENTRY', name: '19mm Ply with 4mm hdhmr', unit: 'Sq. Ft', rate: 140, agency: 'Carpentry' },
+  { category: 'CARPENTRY', name: '12mm Ply with 6mm HDHMR (routed)', unit: 'Sq. Ft', rate: 250, agency: 'Carpentry' },
+  { category: 'CARPENTRY', name: '19mm Ply with 6mm HDHMR (routed)', unit: 'Sq. Ft', rate: 280, agency: 'Carpentry' },
+  { category: 'CARPENTRY', name: '12mm Flexible Ply', unit: 'Sq. Ft', rate: 150, agency: 'Carpentry' },
+  { category: 'CARPENTRY', name: '12mm Flexible Ply finish in 4mm hdhmr', unit: 'Sq. Ft', rate: 230, agency: 'Carpentry' },
+  { category: 'CARPENTRY', name: '12mm Flexible Ply finish in veneer', unit: 'Sq. Ft', rate: 270, agency: 'Carpentry' },
+  { category: 'CARPENTRY', name: 'SF Laminate Finish', unit: 'Sq. Ft', rate: 50, agency: 'Carpentry' },
+  { category: 'CARPENTRY', name: 'Mid Range Laminate Finish', unit: 'Sq. Ft', rate: 75, agency: 'Carpentry' },
+  { category: 'CARPENTRY', name: 'Top end Laminate Finish', unit: 'Sq. Ft', rate: 100, agency: 'Carpentry' },
+  { category: 'CARPENTRY', name: '19mm ply + Veneer/ Teak 4mm (Economic)', unit: 'Sq. Ft', rate: 155, agency: 'Carpentry' },
+  { category: 'CARPENTRY', name: '19mm ply + Veneer/ Teak 4mm (Regular)', unit: 'Sq. Ft', rate: 200, agency: 'Carpentry' },
+  { category: 'CARPENTRY', name: '19mm ply + Veneer/ Teak 4mm (Decorative - Luxury)', unit: 'Sq. Ft', rate: 280, agency: 'Carpentry' },
+  { category: 'CARPENTRY', name: '19mm ply + wall paper', unit: 'Sq. Ft', rate: 180, agency: 'Carpentry' },
+  { category: 'CARPENTRY', name: 'Veneer/ Teak 4mm (Economic)', unit: 'Sq. Ft', rate: 75, agency: 'Carpentry' },
+  { category: 'CARPENTRY', name: 'Veneer/ Teak 4mm (Regular)', unit: 'Sq. Ft', rate: 120, agency: 'Carpentry' },
+  { category: 'CARPENTRY', name: 'Veneer/ Teak 4mm (Decorative - Luxury)', unit: 'Sq. Ft', rate: 200, agency: 'Carpentry' },
+  { category: 'CARPENTRY', name: 'Decorative Sheet (Economic)', unit: 'Sq. Ft', rate: 120, agency: 'Carpentry' },
+  { category: 'CARPENTRY', name: 'Decorative Sheet (Mid Range)', unit: 'Sq. Ft', rate: 180, agency: 'Carpentry' },
+  { category: 'CARPENTRY', name: 'Decorative Sheet (Luxury)', unit: 'Sq. Ft', rate: 250, agency: 'Carpentry' },
+  { category: 'CARPENTRY', name: 'WPC / HDHMR mouldings', unit: 'Running Ft', rate: 150, agency: 'Carpentry' },
+  { category: 'CARPENTRY', name: '45mm Flush Door (30mm + 4mm +4mm) veneer', unit: 'Sq. Ft', rate: 360, agency: 'Carpentry' },
+  { category: 'CARPENTRY', name: '45mm Flush Door (30mm + 4mm +4mm) hdhmr', unit: 'Sq. Ft', rate: 140, agency: 'Carpentry' },
+  { category: 'CARPENTRY', name: 'Flush Door (25mm + 12mm +12mm MDF) (routed)', unit: 'Sq. Ft', rate: 280, agency: 'Carpentry' },
+  { category: 'FLOORING', name: "2'X2' tile", unit: 'Sq. Ft', rate: 65, agency: 'Flooring' },
+  { category: 'FLOORING', name: "4'X2' tile", unit: 'Sq. Ft', rate: 100, agency: 'Flooring' },
+  { category: 'FLOORING', name: '2\'6"X5\' tile', unit: 'Sq. Ft', rate: 120, agency: 'Flooring' },
+  { category: 'FLOORING', name: "4'x6'", unit: 'Sq. Ft', rate: 150, agency: 'Flooring' },
+  { category: 'FLOORING', name: "4'x8' tile", unit: 'Sq. Ft', rate: 170, agency: 'Flooring' },
+  { category: 'FLOORING', name: '1\'x1\'6" highlighter tile', unit: 'Sq. Ft', rate: 320, agency: 'Flooring' },
+  { category: 'FLOORING', name: 'Italian Floor', unit: 'Sq. Ft', rate: 500, agency: 'Flooring' },
+  { category: 'FLOORING', name: 'Laminated wooden floor (MDF/HDF base)', unit: 'Sq. Ft', rate: 150, agency: 'Flooring' },
+  { category: 'FLOORING', name: 'Engineered wooden floor', unit: 'Sq. Ft', rate: 500, agency: 'Flooring' },
+  { category: 'FLOORING', name: 'SPC flooring', unit: 'Sq. Ft', rate: 250, agency: 'Flooring' },
+  { category: 'FLOORING', name: 'Carpet Floor', unit: 'Sq. Ft', rate: 120, agency: 'Flooring' },
+  { category: 'PAINT & Polish', name: 'Wall pop punning', unit: 'Sq. Ft', rate: 50, agency: 'Painting' },
+  { category: 'PAINT & Polish', name: 'Wall pop punning (exclusive)', unit: 'Sq. Ft', rate: 150, agency: 'Painting' },
+  { category: 'PAINT & Polish', name: 'Distemper Paint', unit: 'Sq. Ft', rate: 10, agency: 'Painting' },
+  { category: 'PAINT & Polish', name: 'Emulsion Paint', unit: 'Sq. Ft', rate: 40, agency: 'Painting' },
+  { category: 'PAINT & Polish', name: 'Enamel Paint', unit: 'Sq. Ft', rate: 80, agency: 'Painting' },
+  { category: 'PAINT & Polish', name: 'Texture Paint', unit: 'Sq. Ft', rate: 150, agency: 'Painting' },
+  { category: 'PAINT & Polish', name: 'Lustre Paint', unit: 'Sq. Ft', rate: 150, agency: 'Painting' },
+  { category: 'PAINT & Polish', name: 'PU Paint', unit: 'Sq. Ft', rate: 250, agency: 'Painting' },
+  { category: 'PAINT & Polish', name: 'DUCO Paint', unit: 'Sq. Ft', rate: 150, agency: 'Painting' },
+  { category: 'PAINT & Polish', name: 'PU Polish', unit: 'Sq. Ft', rate: 250, agency: 'Painting' },
+  { category: 'PAINT & Polish', name: 'Melamine Polish', unit: 'Sq. Ft', rate: 150, agency: 'Painting' },
+  { category: 'FALSE CEILING', name: 'false ceiling with gyypsum board', unit: 'Sq. Ft', rate: 100, agency: 'False Ceiling' },
+  { category: 'FALSE CEILING', name: 'false ceiling with Pop board', unit: 'Sq. Ft', rate: 120, agency: 'False Ceiling' },
+  { category: 'FALSE CEILING', name: 'false ceiling with Shera Board', unit: 'Sq. Ft', rate: 80, agency: 'False Ceiling' },
+  { category: 'FALSE CEILING', name: 'false ceiling with VOX / Pare', unit: 'Sq. Ft', rate: 250, agency: 'False Ceiling' },
+  { category: 'FALSE CEILING', name: 'false ceiling with HPL / ACP', unit: 'Sq. Ft', rate: 300, agency: 'False Ceiling' },
+  { category: 'FALSE CEILING', name: 'strech ceiling', unit: 'Sq. Ft', rate: 1500, agency: 'False Ceiling' },
+  { category: 'Lighting & Fan', name: 'Wall Lamps', unit: 'L.S.', rate: 5000, agency: 'Electrical' },
+  { category: 'Lighting & Fan', name: 'Ceiling hanging Lamps', unit: 'L.S.', rate: 5000, agency: 'Electrical' },
+  { category: 'Lighting & Fan', name: 'Chandelier (Small)', unit: 'L.S.', rate: 15000, agency: 'Electrical' },
+  { category: 'Lighting & Fan', name: 'Chandelier (Mid Size)', unit: 'L.S.', rate: 25000, agency: 'Electrical' },
+  { category: 'Lighting & Fan', name: 'Chandelier (Large)', unit: 'L.S.', rate: 75000, agency: 'Electrical' },
+  { category: 'Lighting & Fan', name: 'Chandelier (Luxury)', unit: 'L.S.', rate: 200000, agency: 'Electrical' },
+  { category: 'Lighting & Fan', name: 'Fan (economical Range)', unit: 'Nos.', rate: 5000, agency: 'Electrical' },
+  { category: 'Lighting & Fan', name: 'Fan (Mid Range)', unit: 'Nos.', rate: 10000, agency: 'Electrical' },
+  { category: 'Lighting & Fan', name: 'Fan (luxury Range)', unit: 'Nos.', rate: 15000, agency: 'Electrical' },
+  { category: 'PARTTIONS', name: 'Internal Glass Partitions', unit: 'Sq. Ft', rate: 2500, agency: 'Fabrication' },
+  { category: 'PARTTIONS', name: 'metal work', unit: 'Running Ft', rate: 2500, agency: 'Fabrication' },
+  { category: 'PARTTIONS', name: 'Metal Jali', unit: 'Sq. Ft', rate: 3000, agency: 'Fabrication' },
+  { category: 'DECOR', name: 'Painting - Artifacts (Economic Range)', unit: 'L.S.', rate: 3000, agency: 'Decor' },
+  { category: 'DECOR', name: 'Painting - Artifacts (Mid Range)', unit: 'L.S.', rate: 8000, agency: 'Decor' },
+  { category: 'DECOR', name: 'Painting - Artifacts (Luxury Range)', unit: 'L.S.', rate: 15000, agency: 'Decor' },
+  { category: 'DECOR', name: 'Wall-paper (Economic Range)', unit: 'Sq. Ft', rate: 60, agency: 'Decor' },
+  { category: 'DECOR', name: 'Wall-paper (Mid Range)', unit: 'Sq. Ft', rate: 120, agency: 'Decor' },
+  { category: 'DECOR', name: 'Wall-paper (Luxury Range)', unit: 'Sq. Ft', rate: 200, agency: 'Decor' },
+  { category: 'DECOR', name: 'Sculpture (Small)', unit: 'L.S.', rate: 5000, agency: 'Decor' },
+  { category: 'DECOR', name: 'Sculpture (Mid Size)', unit: 'L.S.', rate: 15000, agency: 'Decor' },
+  { category: 'DECOR', name: 'Sculpture (Large)', unit: 'L.S.', rate: 25000, agency: 'Decor' },
+  { category: 'DECOR', name: 'planter (small)', unit: 'Nos.', rate: 4000, agency: 'Decor' },
+  { category: 'DECOR', name: 'planter (Large)', unit: 'Nos.', rate: 8000, agency: 'Decor' },
+  { category: 'DECOR', name: 'Artifacts and table decor', unit: 'L.S.', rate: 4000, agency: 'Decor' },
+  { category: 'DECOR', name: 'floor lamp', unit: 'Nos.', rate: 8000, agency: 'Decor' },
+  { category: 'DECOR', name: 'Mirror', unit: 'Nos.', rate: 5000, agency: 'Decor' },
+  { category: 'DECOR', name: 'Artifacts embellishment', unit: 'L.S.', rate: 10000, agency: 'Decor' },
+  { category: 'DECOR', name: 'Fire Place', unit: 'L.S.', rate: 100000, agency: 'Decor' },
+  { category: 'CLADDING', name: 'Stone (Economic - cut pieces)', unit: 'Sq. Ft', rate: 150, agency: 'Flooring' },
+  { category: 'CLADDING', name: 'Stone (Mid range Decorative Slabs)', unit: 'Sq. Ft', rate: 250, agency: 'Flooring' },
+  { category: 'CLADDING', name: 'Stone (Luxury/ Backlit)', unit: 'Sq. Ft', rate: 1500, agency: 'Flooring' },
+  { category: 'CLADDING', name: 'HPL Cladding', unit: 'Sq. Ft', rate: 400, agency: 'Flooring' },
+  { category: 'CLADDING', name: 'ACP Cladding', unit: 'Sq. Ft', rate: 250, agency: 'Flooring' },
+  { category: 'FURNITURE', name: 'TV Console (Runner Only)', unit: 'Sq. Ft', rate: 3000, agency: 'Modular Furniture' },
+  { category: 'FURNITURE', name: 'Wardrobes (Mid Range)', unit: 'Sq. Ft', rate: 3000, agency: 'Modular Furniture' },
+  { category: 'FURNITURE', name: 'Kitchen (Mid Range in HG Laminate)', unit: 'Sq. Ft', rate: 3000, agency: 'Modular Furniture' },
+  { category: 'FURNITURE', name: 'Furniture (Mid Range)', unit: 'Sq. Ft', rate: 3000, agency: 'Modular Furniture' },
+  { category: 'FURNITURE', name: 'Sofa (Luxury)', unit: 'Nos.', rate: 30000, agency: 'Modular Furniture' },
+  { category: 'FURNITURE', name: 'Centre Table', unit: 'L.S.', rate: 30000, agency: 'Modular Furniture' },
+  { category: 'FURNITURE', name: 'Nesting Tables', unit: 'L.S.', rate: 15000, agency: 'Modular Furniture' },
+  { category: 'FURNITURE', name: 'Dining Table (Wooden)', unit: 'Sq. Ft', rate: 3000, agency: 'Modular Furniture' },
+  { category: 'FURNITURE', name: 'Dining Table (Regular Stone)', unit: 'Sq. Ft', rate: 5000, agency: 'Modular Furniture' },
+  { category: 'FURNITURE', name: 'Dining Table (Luxury Stone)', unit: 'Sq. Ft', rate: 10000, agency: 'Modular Furniture' },
+  { category: 'FURNITURE', name: 'Dining Chairs', unit: 'Nos.', rate: 15000, agency: 'Modular Furniture' },
+  { category: 'FURNITURE', name: 'Dining Chairs (luxury)', unit: 'Nos.', rate: 22000, agency: 'Modular Furniture' },
+  { category: 'FURNITURE', name: 'Shelf unit with profile glass shutters (with glass shelves inside)', unit: 'Sq. Ft', rate: 2000, agency: 'Modular Furniture' },
+  { category: 'FURNITURE', name: 'Shelf unit with profile glass shutters (with ply shelves inside)', unit: 'Sq. Ft', rate: 1800, agency: 'Modular Furniture' },
+  { category: 'FURNITURE', name: 'Console (Economic Range)', unit: 'Nos.', rate: 30000, agency: 'Modular Furniture' },
+  { category: 'FURNITURE', name: 'Console (Mid Range)', unit: 'Nos.', rate: 40000, agency: 'Modular Furniture' },
+  { category: 'FURNITURE', name: 'Console (Luxury Range)', unit: 'Nos.', rate: 50000, agency: 'Modular Furniture' },
+  { category: 'FURNITURE', name: 'Bed (fully hydraulic + full cuahion)', unit: 'Nos.', rate: 100000, agency: 'Modular Furniture' },
+  { category: 'FURNITURE', name: 'fabric panel', unit: 'Nos.', rate: 450, agency: 'Modular Furniture' },
+  { category: 'FURNITURE', name: '3 seater sofa', unit: 'Nos.', rate: 75000, agency: 'Modular Furniture' },
+  { category: 'FURNITURE', name: '2 seater sofa', unit: 'Nos.', rate: 50000, agency: 'Modular Furniture' },
+  { category: 'FURNITURE', name: 'single seater sofa', unit: 'Nos.', rate: 25000, agency: 'Modular Furniture' },
+  { category: 'FURNITURE', name: 'ootman 2 seater', unit: 'Nos.', rate: 50000, agency: 'Modular Furniture' },
+  { category: 'FURNITURE', name: 'chair', unit: 'Nos.', rate: 25000, agency: 'Modular Furniture' },
+  { category: 'FURNITURE', name: 'Side Table (Economic Range)', unit: 'Nos.', rate: 8000, agency: 'Modular Furniture' },
+  { category: 'FURNITURE', name: 'Side Table (Mid Range)', unit: 'Nos.', rate: 12000, agency: 'Modular Furniture' },
+  { category: 'FURNITURE', name: 'Side Table (Luxury Range)', unit: 'Nos.', rate: 18000, agency: 'Modular Furniture' },
+  { category: 'D/W sections', name: 'windows section (economical Range)', unit: 'Sq. Ft', rate: 700, agency: 'Windows' },
+  { category: 'D/W sections', name: 'windows section (Mid Range)', unit: 'Sq. Ft', rate: 1200, agency: 'Windows' },
+  { category: 'D/W sections', name: 'windows section (luxury Range)', unit: 'Sq. Ft', rate: 1500, agency: 'Windows' },
+  { category: 'D/W sections', name: 'Sliding prodile glass (plain)', unit: 'Sq. Ft', rate: 1200, agency: 'Windows' },
+  { category: 'D/W sections', name: 'Sliding prodile glass (fabric)', unit: 'Sq. Ft', rate: 1350, agency: 'Windows' },
+  { category: 'D/W sections', name: 'Sliding prodile glass (fluted)', unit: 'Sq. Ft', rate: 1500, agency: 'Windows' },
+  { category: 'D/W sections', name: 'Clear toughned glass Railing', unit: 'Sq. Ft', rate: 700, agency: 'Windows' },
+  { category: 'D/W sections', name: 'Metal door', unit: 'Sq. Ft', rate: 3000, agency: 'Windows' },
+  { category: 'Furnishings', name: 'Throws', unit: 'Nos.', rate: 3000, agency: 'Furnishing' },
+  { category: 'Furnishings', name: 'Throw cushions', unit: 'Nos.', rate: 800, agency: 'Furnishing' },
+  { category: 'Furnishings', name: '6" mattress SIZE: 6\'X6\'6"', unit: 'Nos.', rate: 30000, agency: 'Furnishing' },
+  { category: 'Furnishings', name: 'Rugs (Economic Range)', unit: 'Sq. Ft', rate: 100, agency: 'Furnishing' },
+  { category: 'Furnishings', name: 'Rugs (Mid Range)', unit: 'Sq. Ft', rate: 250, agency: 'Furnishing' },
+  { category: 'Furnishings', name: 'Rugs (Luxury Range)', unit: 'Sq. Ft', rate: 750, agency: 'Furnishing' },
+  { category: 'Furnishings', name: 'Curtains (Economic Range)', unit: 'Sq. Ft', rate: 50, agency: 'Furnishing' },
+  { category: 'Furnishings', name: 'Curtains (Mid Range)', unit: 'Sq. Ft', rate: 100, agency: 'Furnishing' },
+  { category: 'Furnishings', name: 'Curtains (Luxury Range)', unit: 'Sq. Ft', rate: 150, agency: 'Furnishing' },
+  { category: 'Furnishings', name: 'Blinds (Economic Range)', unit: 'Sq. Ft', rate: 120, agency: 'Furnishing' },
+  { category: 'Furnishings', name: 'Blinds (Mid Range)', unit: 'Sq. Ft', rate: 200, agency: 'Furnishing' },
+  { category: 'Furnishings', name: 'Blinds (Luxury Range)', unit: 'Sq. Ft', rate: 250, agency: 'Furnishing' }
+];
+
+// Real BOQ line items pulled from the user's Entrance Foyer + Drawing Room
+// (same source file) — used to seed a faithful, realistic demo project.
+var DEMO_BOQ_ITEMS = [
+  { space: 'Entrance Foyer', name: 'Italian Floor', category: 'FLOORING', agency: 'Flooring', unit: 'Sq. Ft', qty: 80, rate: 500 },
+  { space: 'Entrance Foyer', name: 'Ply Board Ceiling finish with veneer', category: 'CARPENTRY', agency: 'Carpentry', unit: 'Sq. Ft', qty: 80, rate: 200 },
+  { space: 'Entrance Foyer', name: 'Ceiling veneer polish', category: 'PAINT & Polish', agency: 'Painting', unit: 'Sq. Ft', qty: 80, rate: 250 },
+  { space: 'Entrance Foyer', name: 'Wall punning', category: 'PAINT & Polish', agency: 'Painting', unit: 'Sq. Ft', qty: 50, rate: 50 },
+  { space: 'Entrance Foyer', name: 'Texture paint', category: 'PAINT & Polish', agency: 'Painting', unit: 'Sq. Ft', qty: 50, rate: 150 },
+  { space: 'Entrance Foyer', name: 'Back Lit Stone panel', category: 'FLOORING', agency: 'Flooring', unit: 'Sq. Ft', qty: 35, rate: 500 },
+  { space: 'Entrance Foyer', name: 'Venner panel', category: 'CARPENTRY', agency: 'Carpentry', unit: 'Sq. Ft', qty: 26, rate: 200 },
+  { space: 'Entrance Foyer', name: 'Venner panel polish', category: 'PAINT & Polish', agency: 'Painting', unit: 'Sq. Ft', qty: 26, rate: 250 },
+  { space: 'Entrance Foyer', name: 'Wall punning', category: 'PAINT & Polish', agency: 'Painting', unit: 'Sq. Ft', qty: 25, rate: 150 },
+  { space: 'Entrance Foyer', name: 'Texture paint', category: 'FLOORING', agency: 'Flooring', unit: 'Sq. Ft', qty: 25, rate: 500 },
+  { space: 'Entrance Foyer', name: 'Opening to living room jamming', category: 'FLOORING', agency: 'Flooring', unit: 'Sq. Ft', qty: 66, rate: 500 },
+  { space: 'Entrance Foyer', name: 'Around Opening to living room stone panel', category: 'FLOORING', agency: 'Flooring', unit: 'Sq. Ft', qty: 9, rate: 500 },
+  { space: 'Entrance Foyer', name: 'Around Door to drawing room stone panel', category: 'FLOORING', agency: 'Flooring', unit: 'Sq. Ft', qty: 10.5, rate: 500 },
+  { space: 'Entrance Foyer', name: 'Wall punning', category: 'PAINT & Polish', agency: 'Painting', unit: 'Sq. Ft', qty: 40, rate: 50 },
+  { space: 'Entrance Foyer', name: 'Texture paint', category: 'PAINT & Polish', agency: 'Painting', unit: 'Sq. Ft', qty: 40, rate: 40 },
+  { space: 'Entrance Foyer', name: 'Wall punning', category: 'PAINT & Polish', agency: 'Painting', unit: 'Sq. Ft', qty: 25, rate: 40 },
+  { space: 'Entrance Foyer', name: 'Texture paint', category: 'FLOORING', agency: 'Flooring', unit: 'Sq. Ft', qty: 25, rate: 500 },
+  { space: 'Entrance Foyer', name: 'Main Entrance Jamming', category: 'FLOORING', agency: 'Flooring', unit: 'Sq. Ft', qty: 66, rate: 500 },
+  { space: 'Entrance Foyer', name: 'Around Opening stone panel', category: 'FLOORING', agency: 'Flooring', unit: 'Sq. Ft', qty: 9, rate: 500 },
+  { space: 'Entrance Foyer', name: 'Main Entrance Metal door', category: 'D/W sections', agency: 'Windows', unit: 'Sq. Ft', qty: 42.5, rate: 3000 },
+  { space: 'Entrance Foyer', name: 'Console', category: 'FURNITURE', agency: 'Modular Furniture', unit: 'Nos.', qty: 1, rate: 40000 },
+  { space: 'Entrance Foyer', name: 'Wall lamp', category: 'DECOR', agency: 'Decor', unit: 'L.S.', qty: 1, rate: 15000 },
+  { space: 'Entrance Foyer', name: 'Sitting human figure light', category: 'Lighting & Fan', agency: 'Electrical', unit: 'L.S.', qty: 1, rate: 25000 },
+  { space: 'Entrance Foyer', name: 'Chandelier', category: 'DECOR', agency: 'Decor', unit: 'Nos.', qty: 1, rate: 4000 },
+  { space: 'Entrance Foyer', name: 'Planter', category: 'DECOR', agency: 'Decor', unit: 'L.S.', qty: 1, rate: 4000 },
+  { space: 'Entrance Foyer', name: 'Artifacts and table decor', category: 'DECOR', agency: 'Decor', unit: 'L.S.', qty: 3, rate: 4000 },
+  { space: 'Entrance Foyer', name: 'Rug', category: 'Furnishings', agency: 'Furnishing', unit: 'Sq. Ft', qty: 16, rate: 750 },
+  { space: 'Drawing Room', name: 'Italian Floor', category: 'FLOORING', agency: 'Flooring', unit: 'Sq. Ft', qty: 270, rate: 500 },
+  { space: 'Drawing Room', name: 'Gypsum Board Ceiling', category: 'FALSE CEILING', agency: 'False Ceiling', unit: 'Sq. Ft', qty: 270, rate: 120 },
+  { space: 'Drawing Room', name: 'Gypsum Board Ceiling Paint', category: 'PAINT & Polish', agency: 'Painting', unit: 'Sq. Ft', qty: 270, rate: 80 },
+  { space: 'Drawing Room', name: 'Wall punning', category: 'PAINT & Polish', agency: 'Painting', unit: 'Sq. Ft', qty: 80, rate: 50 },
+  { space: 'Drawing Room', name: 'Texture paint', category: 'PAINT & Polish', agency: 'Painting', unit: 'Sq. Ft', qty: 80, rate: 40 },
+  { space: 'Drawing Room', name: 'Stone panel', category: 'FLOORING', agency: 'Flooring', unit: 'Sq. Ft', qty: 35, rate: 500 },
+  { space: 'Drawing Room', name: 'Window to living room stone frame', category: 'FLOORING', agency: 'Flooring', unit: 'Sq. Ft', qty: 93, rate: 500 },
+  { space: 'Drawing Room', name: 'Metal Jali', category: 'PARTTIONS', agency: 'Fabrication', unit: 'Sq. Ft', qty: 48, rate: 2500 },
+  { space: 'Drawing Room', name: 'Window to living room stone panel above window', category: 'FLOORING', agency: 'Flooring', unit: 'Sq. Ft', qty: 1.5, rate: 500 },
+  { space: 'Drawing Room', name: 'Wall punning', category: 'PAINT & Polish', agency: 'Painting', unit: 'Sq. Ft', qty: 90, rate: 50 },
+  { space: 'Drawing Room', name: 'Texture paint', category: 'PAINT & Polish', agency: 'Painting', unit: 'Sq. Ft', qty: 90, rate: 150 },
+  { space: 'Drawing Room', name: 'Stone panel', category: 'FLOORING', agency: 'Flooring', unit: 'Sq. Ft', qty: 20, rate: 500 },
+  { space: 'Drawing Room', name: 'Concerte interior sqaure grid and finished in paint', category: 'FLOORING', agency: 'Flooring', unit: 'Sq. Ft', qty: 15, rate: 320 },
+  { space: 'Drawing Room', name: 'Wall punning with grooves', category: 'PAINT & Polish', agency: 'Painting', unit: 'Sq. Ft', qty: 22.4, rate: 50 },
+  { space: 'Drawing Room', name: 'Texture paint', category: 'PAINT & Polish', agency: 'Painting', unit: 'Sq. Ft', qty: 22.4, rate: 150 },
+  { space: 'Drawing Room', name: 'Window to balcony stone frame', category: 'FLOORING', agency: 'Flooring', unit: 'Sq. Ft', qty: 93, rate: 500 },
+  { space: 'Drawing Room', name: 'Around Window to living room stone panel', category: 'FLOORING', agency: 'Flooring', unit: 'Sq. Ft', qty: 24, rate: 500 },
+  { space: 'Drawing Room', name: 'Wall punning', category: 'PAINT & Polish', agency: 'Painting', unit: 'Sq. Ft', qty: 75, rate: 50 },
+  { space: 'Drawing Room', name: 'Texture paint', category: 'PAINT & Polish', agency: 'Painting', unit: 'Sq. Ft', qty: 75, rate: 40 },
+  { space: 'Drawing Room', name: 'Stone panel', category: 'FLOORING', agency: 'Flooring', unit: 'Sq. Ft', qty: 20, rate: 500 },
+  { space: 'Drawing Room', name: 'Sliding Glass Window section', category: 'D/W sections', agency: 'Windows', unit: 'Sq. Ft', qty: 52.5, rate: 1200 },
+  { space: 'Drawing Room', name: 'Stone panel', category: 'FLOORING', agency: 'Flooring', unit: 'Sq. Ft', qty: 35, rate: 500 },
+  { space: 'Drawing Room', name: 'Wall punning', category: 'PAINT & Polish', agency: 'Painting', unit: 'Sq. Ft', qty: 45, rate: 50 },
+  { space: 'Drawing Room', name: 'Texture paint', category: 'PAINT & Polish', agency: 'Painting', unit: 'Sq. Ft', qty: 45, rate: 40 },
+  { space: 'Drawing Room', name: 'Around Opening to foyer stone panel', category: 'FLOORING', agency: 'Flooring', unit: 'Sq. Ft', qty: 9.75, rate: 500 },
+  { space: 'Drawing Room', name: 'Sliding Glass Door 12mm sliding toughened glass with powder coated aluminium section with Hardware and handles', category: 'D/W sections', agency: 'Windows', unit: 'Sq. Ft', qty: 38, rate: 1200 },
+  { space: 'Drawing Room', name: 'Opening stone frame', category: 'FLOORING', agency: 'Flooring', unit: 'Sq. Ft', qty: 72, rate: 500 },
+  { space: 'Drawing Room', name: '3 seater sofa', category: 'FURNITURE', agency: 'Modular Furniture', unit: 'Nos.', qty: 1, rate: 75000 },
+  { space: 'Drawing Room', name: '2 seater ottoman', category: 'FURNITURE', agency: 'Modular Furniture', unit: 'Nos.', qty: 1, rate: 50000 },
+  { space: 'Drawing Room', name: '3 seater sofa', category: 'FURNITURE', agency: 'Modular Furniture', unit: 'Nos.', qty: 1, rate: 75000 },
+  { space: 'Drawing Room', name: 'chair', category: 'FURNITURE', agency: 'Modular Furniture', unit: 'Nos.', qty: 1, rate: 25000 },
+  { space: 'Drawing Room', name: 'Center table', category: 'FURNITURE', agency: 'Modular Furniture', unit: 'L.S.', qty: 1, rate: 30000 },
+  { space: 'Drawing Room', name: 'Side nesting table', category: 'FURNITURE', agency: 'Modular Furniture', unit: 'L.S.', qty: 1, rate: 15000 },
+  { space: 'Drawing Room', name: 'Painting - Wall Hung (3\'6" x 4\'6" in size)', category: 'DECOR', agency: 'Decor', unit: 'L.S.', qty: 1, rate: 15000 },
+  { space: 'Drawing Room', name: 'Floor Lamp', category: 'DECOR', agency: 'Decor', unit: 'Nos.', qty: 1, rate: 8000 },
+  { space: 'Drawing Room', name: 'Hanging LIght', category: 'Lighting & Fan', agency: 'Electrical', unit: 'L.S.', qty: 1, rate: 5000 },
+  { space: 'Drawing Room', name: 'Ceiling Fan', category: 'Lighting & Fan', agency: 'Electrical', unit: 'Nos.', qty: 1, rate: 10000 },
+  { space: 'Drawing Room', name: 'Artifacts and table decor', category: 'DECOR', agency: 'Decor', unit: 'L.S.', qty: 10, rate: 4000 },
+  { space: 'Drawing Room', name: 'Roman curtain', category: 'Furnishings', agency: 'Furnishing', unit: 'Sq. Ft', qty: 52.5, rate: 150 },
+  { space: 'Drawing Room', name: 'Rug', category: 'Furnishings', agency: 'Furnishing', unit: 'Sq. Ft', qty: 96, rate: 250 },
+  { space: 'Drawing Room', name: 'Throws', category: 'Furnishings', agency: 'Furnishing', unit: 'Nos.', qty: 3, rate: 3000 },
+  { space: 'Drawing Room', name: 'Throw cushions', category: 'Furnishings', agency: 'Furnishing', unit: 'Nos.', qty: 10, rate: 800 },
+];
 
 // ---------- Notifications ----------
 // Email works out of the box (MailApp, no external account needed). WhatsApp is
@@ -98,8 +296,14 @@ function spaceName_(spaceId) {
 var TABS = {
   PROJECTS: { name: 'PROJECTS', headers: ['ProjectID', 'Name', 'Address', 'StartDate', 'TargetMoveIn', 'Budget', 'ClientName', 'CreatedAt'] },
   SPACES: { name: 'SPACES', headers: ['SpaceID', 'ProjectID', 'Name', 'SortOrder'] },
-  TRACKER: { name: 'TRACKER', headers: ['TrackerID', 'ProjectID', 'SpaceID', 'Category', 'SubItem', 'StagesJSON', 'RollupStatus', 'UpdatedAt'] },
-  CASHFLOW: { name: 'CASHFLOW', headers: ['CashflowID', 'ProjectID', 'SpaceID', 'Category', 'BOQValue', 'SplitJSON', 'Invoiced', 'Received', 'DueDate', 'PaymentStatus', 'UpdatedAt'] },
+  MATERIALS_CONFIG: { name: 'MATERIALS_CONFIG', headers: ['MaterialID', 'Category', 'Name', 'Unit', 'Rate', 'Agency', 'Active', 'CreatedAt'] },
+  BOQ_ITEMS: {
+    name: 'BOQ_ITEMS', headers: [
+      'BoqItemID', 'ProjectID', 'SpaceID', 'MaterialID', 'MaterialName', 'Category', 'Agency',
+      'Unit', 'Quantity', 'Rate', 'Amount', 'SplitJSON', 'Invoiced', 'Received', 'DueDate',
+      'PaymentStatus', 'StagesJSON', 'RollupStatus', 'Notes', 'CreatedAt', 'UpdatedAt'
+    ]
+  },
   DAILY_LOG: { name: 'DAILY_LOG', headers: ['LogID', 'Date', 'ProjectID', 'SpaceID', 'Entry', 'LoggedBy', 'HasBlocker', 'CreatedAt'] }
 };
 
@@ -161,6 +365,23 @@ function nextId_(prefix, existingIds) {
   return prefix + '-' + String(max + 1).padStart(3, '0');
 }
 
+function computeRollup_(stages) {
+  var hasDelayed = stages.some(function (s) { return s.status === 'Delayed'; });
+  if (hasDelayed) return 'Delayed';
+  var allDone = stages.every(function (s) { return s.status === 'Done' || s.status === 'N/A'; });
+  if (allDone) return 'Done';
+  var anyProgress = stages.some(function (s) { return s.status === 'In Progress'; });
+  if (anyProgress) return 'In Progress';
+  return 'Not Started';
+}
+
+function daysAgoISO_(n) {
+  var d = new Date();
+  d.setDate(d.getDate() - n);
+  return Utilities.formatDate(d, 'Asia/Kolkata', 'yyyy-MM-dd');
+}
+function daysFromNowISO_(n) { return daysAgoISO_(-n); }
+
 // ---------- One-time setup ----------
 
 function setup() {
@@ -178,13 +399,52 @@ function setup() {
   }
   Object.keys(TABS).forEach(function (key) { getTab_(ss, key); });
 
-  // Seed a demo project only if PROJECTS is empty
+  seedMaterialsIfEmpty_(ss);
+
   var projSheet = getTab_(ss, 'PROJECTS');
   if (rowsToObjects_(projSheet).length === 0) {
     seedDemoProject_(ss);
   }
   Logger.log('PMC sheet ready: ' + ss.getUrl());
   return ss.getUrl();
+}
+
+// One-time: run this from the Apps Script editor to move an existing sheet from
+// the old fixed-subitem TRACKER/CASHFLOW model to the BOQ_ITEMS model. Safe to
+// run more than once (idempotent) — it always leaves a fresh demo project.
+function migrateToBoq() {
+  var ss = getSS_();
+  ['TRACKER', 'CASHFLOW'].forEach(function (name) {
+    var sh = ss.getSheetByName(name);
+    if (sh) ss.deleteSheet(sh);
+  });
+  ['PROJECTS', 'SPACES', 'DAILY_LOG'].forEach(function (key) {
+    var sh = getTab_(ss, key);
+    if (sh.getLastRow() > 1) sh.deleteRows(2, sh.getLastRow() - 1);
+  });
+  var matSheet = getTab_(ss, 'MATERIALS_CONFIG');
+  if (matSheet.getLastRow() > 1) matSheet.deleteRows(2, matSheet.getLastRow() - 1);
+  var boqSheet = getTab_(ss, 'BOQ_ITEMS');
+  if (boqSheet.getLastRow() > 1) boqSheet.deleteRows(2, boqSheet.getLastRow() - 1);
+
+  seedMaterialsIfEmpty_(ss);
+  seedDemoProject_(ss);
+  Logger.log('Migrated to BOQ_ITEMS model: ' + ss.getUrl());
+  return ss.getUrl();
+}
+
+function seedMaterialsIfEmpty_(ss) {
+  var sheet = getTab_(ss, 'MATERIALS_CONFIG');
+  if (rowsToObjects_(sheet).length > 0) return;
+  var now = new Date();
+  var rows = MATERIALS_SEED.map(function (m, i) {
+    return ['MAT-' + String(i + 1).padStart(3, '0'), m.category, m.name, m.unit, m.rate, m.agency, true, now];
+  });
+  sheet.getRange(2, 1, rows.length, rows[0].length).setValues(rows);
+}
+
+function findMaterialByName_(materialsRows, name) {
+  return materialsRows.filter(function (m) { return m.Name === name; })[0];
 }
 
 function seedDemoProject_(ss) {
@@ -197,52 +457,51 @@ function seedDemoProject_(ss) {
   ]);
 
   var spaceSheet = getTab_(ss, 'SPACES');
-  var trackerSheet = getTab_(ss, 'TRACKER');
-  var cashflowSheet = getTab_(ss, 'CASHFLOW');
+  var boqSheet = getTab_(ss, 'BOQ_ITEMS');
   var logSheet = getTab_(ss, 'DAILY_LOG');
+  var materialsRows = rowsToObjects_(getTab_(ss, 'MATERIALS_CONFIG'));
 
-  var spaces = [
-    { id: 'S-001', name: 'Drawing Room' },
-    { id: 'S-002', name: 'Master Bedroom' }
-  ];
-  spaces.forEach(function (sp, idx) {
-    spaceSheet.appendRow([sp.id, projectId, sp.name, idx + 1]);
-    createTrackerRowsForSpace_(trackerSheet, projectId, sp.id, idx === 0 ? 'ahead' : 'behind');
-    createCashflowRowsForSpace_(cashflowSheet, projectId, sp.id, idx === 0 ? 0.55 : 0.3);
+  var spaceNames = ['Entrance Foyer', 'Drawing Room'];
+  var spaceIds = {};
+  spaceNames.forEach(function (name, idx) {
+    var spaceId = 'S-' + String(idx + 1).padStart(3, '0');
+    spaceIds[name] = spaceId;
+    spaceSheet.appendRow([spaceId, projectId, name, idx + 1]);
+  });
+
+  var counters = {};
+  DEMO_BOQ_ITEMS.forEach(function (item) {
+    var spaceId = spaceIds[item.space];
+    if (!spaceId) return;
+    counters[item.space] = (counters[item.space] || 0) + 1;
+    var idx = counters[item.space] - 1;
+    var mode = item.space === 'Entrance Foyer' ? 'ahead' : 'behind';
+    var stages = buildDemoStages_(mode, idx);
+    var rollup = computeRollup_(stages);
+    var mat = findMaterialByName_(materialsRows, item.name);
+    var boqItemId = 'BOQ-' + Utilities.getUuid().slice(0, 6);
+    var amount = item.qty * item.rate;
+    boqSheet.appendRow([
+      boqItemId, projectId, spaceId, mat ? mat.MaterialID : '', item.name, item.category, item.agency,
+      item.unit, item.qty, item.rate, amount, JSON.stringify(DEFAULT_SPLIT),
+      Math.round(amount * (mode === 'ahead' ? 0.7 : 0.3)), Math.round(amount * (mode === 'ahead' ? 0.55 : 0.15)),
+      daysFromNowISO_(14), mode === 'ahead' ? 'Partial' : 'Pending',
+      JSON.stringify(stages), rollup, '', now, now
+    ]);
   });
 
   var engineers = ['Deepak Soni', 'Achal Rathore'];
   var sampleLogs = [
-    { d: -1, sp: 'S-001', by: engineers[0], entry: 'Flooring tiles laid in living area, grouting pending tomorrow. False ceiling frame work started.', blocker: false },
-    { d: -1, sp: 'S-002', by: engineers[1], entry: 'Electrical conduiting completed for master bedroom. Waiting on switch plate selection from client before wiring.', blocker: true },
-    { d: -3, sp: 'S-001', by: engineers[0], entry: 'Wall panelling carpentry work in progress — TV unit framing done.', blocker: false },
-    { d: -5, sp: 'S-002', by: engineers[1], entry: 'AC copper piping installed, drain channel work delayed due to material shortage from vendor.', blocker: true },
-    { d: -7, sp: 'S-001', by: engineers[0], entry: 'Site measurement re-verified for loose furniture layout. BOQ finalized with client.', blocker: false }
+    { d: -1, sp: spaceIds['Entrance Foyer'], by: engineers[0], entry: 'Flooring tiles laid, grouting pending tomorrow. False ceiling frame work started.', blocker: false },
+    { d: -1, sp: spaceIds['Drawing Room'], by: engineers[1], entry: 'Wall punning and texture paint in progress. Waiting on stone panel material delivery.', blocker: true },
+    { d: -3, sp: spaceIds['Entrance Foyer'], by: engineers[0], entry: 'Veneer panel carpentry work in progress on Wall 1.', blocker: false },
+    { d: -5, sp: spaceIds['Drawing Room'], by: engineers[1], entry: 'Metal Jali fabrication delayed due to vendor material shortage.', blocker: true },
+    { d: -7, sp: spaceIds['Entrance Foyer'], by: engineers[0], entry: 'Site measurement re-verified for console placement. BOQ finalized with client.', blocker: false }
   ];
   sampleLogs.forEach(function (l) {
     logSheet.appendRow([
       Utilities.getUuid().slice(0, 8), daysAgoISO_(-l.d), projectId, l.sp, l.entry, l.by, l.blocker, new Date()
     ]);
-  });
-}
-
-function daysAgoISO_(n) {
-  var d = new Date();
-  d.setDate(d.getDate() - n);
-  return Utilities.formatDate(d, 'Asia/Kolkata', 'yyyy-MM-dd');
-}
-function daysFromNowISO_(n) { return daysAgoISO_(-n); }
-
-function createTrackerRowsForSpace_(trackerSheet, projectId, spaceId, mode) {
-  var existingIds = rowsToObjects_(trackerSheet).map(function (r) { return r.TrackerID; });
-  var counter = 0;
-  SUBITEMS.forEach(function (si, idx) {
-    counter++;
-    var trackerId = nextId_('TR', existingIds.concat(['TR-' + String(counter).padStart(4, '0')]));
-    trackerId = 'TR-' + Utilities.getUuid().slice(0, 6);
-    var stages = buildDemoStages_(mode, idx);
-    var rollup = computeRollup_(stages);
-    trackerSheet.appendRow([trackerId, projectId, spaceId, si.category, si.subItem, JSON.stringify(stages), rollup, new Date()]);
   });
 }
 
@@ -271,37 +530,12 @@ function buildDemoStages_(mode, idx) {
   var stages = [];
   STAGES.forEach(function (stageName, i) {
     var status = pattern[i];
-    // Stage 0 target ~60 days ago, stage 5 target ~15 days from now (project timeline).
     var daysAgoForTarget = 60 - i * 15;
     var target = daysAgoISO_(daysAgoForTarget);
     var actual = (status === 'Done') ? daysAgoISO_(daysAgoForTarget + 2) : '';
     stages.push({ stage: stageName, status: status, target: target, actual: actual, note: '' });
   });
   return stages;
-}
-
-function computeRollup_(stages) {
-  var hasDelayed = stages.some(function (s) { return s.status === 'Delayed'; });
-  if (hasDelayed) return 'Delayed';
-  var allDone = stages.every(function (s) { return s.status === 'Done' || s.status === 'N/A'; });
-  if (allDone) return 'Done';
-  var anyProgress = stages.some(function (s) { return s.status === 'In Progress'; });
-  if (anyProgress) return 'In Progress';
-  return 'Not Started';
-}
-
-function createCashflowRowsForSpace_(cashflowSheet, projectId, spaceId, receivedFraction) {
-  CATEGORIES.forEach(function (cat) {
-    var boq = Math.round((150000 + Math.random() * 250000) / 1000) * 1000;
-    var invoiced = Math.round(boq * Math.min(1, receivedFraction + 0.15));
-    var received = Math.round(boq * receivedFraction);
-    var status = received >= invoiced ? 'Paid' : (invoiced > 0 ? 'Partial' : 'Pending');
-    var cashflowId = 'CF-' + Utilities.getUuid().slice(0, 6);
-    cashflowSheet.appendRow([
-      cashflowId, projectId, spaceId, cat, boq, JSON.stringify(DEFAULT_SPLIT),
-      invoiced, received, daysFromNowISO_(14), status, new Date()
-    ]);
-  });
 }
 
 // ---------- Web app entry ----------
@@ -332,7 +566,9 @@ function doPost(e) {
   try { data = JSON.parse(raw || '{}'); } catch (err) { return respond_({ ok: false, error: 'Bad JSON body' }); }
   var routes = {
     addProject: addProject, updateProject: updateProject, addSpace: addSpace,
-    updateStage: updateStage, updateCashflow: updateCashflow, addDailyLog: addDailyLog
+    addMaterial: addMaterial, updateMaterial: updateMaterial,
+    addBoqItem: addBoqItem, updateBoqItem: updateBoqItem,
+    updateStage: updateStage, addDailyLog: addDailyLog
   };
   var fn = routes[data.action];
   if (!fn) return respond_({ ok: false, error: 'Unknown action: ' + data.action });
@@ -342,7 +578,7 @@ function doPost(e) {
 // ---------- Client-callable API ----------
 
 function getSchema() {
-  return { stages: STAGES, subItems: SUBITEMS, categories: CATEGORIES, defaultSplit: DEFAULT_SPLIT };
+  return { stages: STAGES, agencies: AGENCIES, defaultSplit: DEFAULT_SPLIT };
 }
 
 function normDate_(v) {
@@ -358,15 +594,13 @@ function getAllData() {
     return r;
   });
   var spaces = rowsToObjects_(getTab_(ss, 'SPACES'));
-  var tracker = rowsToObjects_(getTab_(ss, 'TRACKER')).map(function (r) {
+  var materialsConfig = rowsToObjects_(getTab_(ss, 'MATERIALS_CONFIG'));
+  var boqItems = rowsToObjects_(getTab_(ss, 'BOQ_ITEMS')).map(function (r) {
     r.Stages = JSON.parse(r.StagesJSON || '[]').map(function (s) {
       s.target = normDate_(s.target);
       s.actual = normDate_(s.actual);
       return s;
     });
-    return r;
-  });
-  var cashflow = rowsToObjects_(getTab_(ss, 'CASHFLOW')).map(function (r) {
     r.Split = JSON.parse(r.SplitJSON || '{}');
     r.DueDate = normDate_(r.DueDate);
     return r;
@@ -377,12 +611,18 @@ function getAllData() {
   });
   dailyLog.sort(function (a, b) { return new Date(b.Date) - new Date(a.Date) || new Date(b.CreatedAt) - new Date(a.CreatedAt); });
 
+  var categories = (function () {
+    var seen = {}, out = [];
+    materialsConfig.forEach(function (m) { if (!seen[m.Category]) { seen[m.Category] = true; out.push(m.Category); } });
+    return out;
+  })();
+
   return {
-    schema: getSchema(),
+    schema: { stages: STAGES, agencies: AGENCIES, categories: categories, defaultSplit: DEFAULT_SPLIT },
     projects: projects,
     spaces: spaces,
-    tracker: tracker,
-    cashflow: cashflow,
+    materialsConfig: materialsConfig,
+    boqItems: boqItems,
     dailyLog: dailyLog
   };
 }
@@ -398,11 +638,9 @@ function addProject(payload) {
   ]);
 
   var spaceSheet = getTab_(ss, 'SPACES');
-  var trackerSheet = getTab_(ss, 'TRACKER');
-  var cashflowSheet = getTab_(ss, 'CASHFLOW');
   var spaceNames = (payload.spaces && payload.spaces.length) ? payload.spaces : ['Drawing Room'];
   spaceNames.forEach(function (name, idx) {
-    var spaceId = addSpaceInternal_(ss, spaceSheet, trackerSheet, cashflowSheet, projectId, name, idx + 1);
+    addSpaceInternal_(spaceSheet, projectId, name, idx + 1);
   });
   return { projectId: projectId };
 }
@@ -424,43 +662,114 @@ function updateProject(payload) {
   return { ok: true };
 }
 
-function addSpaceInternal_(ss, spaceSheet, trackerSheet, cashflowSheet, projectId, name, sortOrder) {
+function addSpaceInternal_(spaceSheet, projectId, name, sortOrder) {
   var existingIds = rowsToObjects_(spaceSheet).map(function (r) { return r.SpaceID; });
   var spaceId = nextId_('S', existingIds);
   spaceSheet.appendRow([spaceId, projectId, name, sortOrder]);
-
-  var existingTrackerIds = [];
-  SUBITEMS.forEach(function (si) {
-    var trackerId = 'TR-' + Utilities.getUuid().slice(0, 6);
-    var stages = STAGES.map(function (stageName) {
-      return { stage: stageName, status: 'Not Started', target: '', actual: '', note: '' };
-    });
-    trackerSheet.appendRow([trackerId, projectId, spaceId, si.category, si.subItem, JSON.stringify(stages), 'Not Started', new Date()]);
-  });
-  CATEGORIES.forEach(function (cat) {
-    var cashflowId = 'CF-' + Utilities.getUuid().slice(0, 6);
-    cashflowSheet.appendRow([cashflowId, projectId, spaceId, cat, 0, JSON.stringify(DEFAULT_SPLIT), 0, 0, '', 'Pending', new Date()]);
-  });
   return spaceId;
 }
 
 function addSpace(payload) {
   var ss = getSS_();
   var spaceSheet = getTab_(ss, 'SPACES');
-  var trackerSheet = getTab_(ss, 'TRACKER');
-  var cashflowSheet = getTab_(ss, 'CASHFLOW');
   var existing = rowsToObjects_(spaceSheet).filter(function (r) { return r.ProjectID === payload.projectId; });
   var sortOrder = existing.length + 1;
-  var spaceId = addSpaceInternal_(ss, spaceSheet, trackerSheet, cashflowSheet, payload.projectId, payload.name, sortOrder);
+  var spaceId = addSpaceInternal_(spaceSheet, payload.projectId, payload.name, sortOrder);
   return { spaceId: spaceId };
 }
 
-function updateStage(payload) {
-  // payload: { trackerId, stage, status, target, actual, note }
+// ---------- Materials catalog CRUD ----------
+
+function addMaterial(payload) {
+  // payload: { category, name, unit, rate, agency }
   var ss = getSS_();
-  var sheet = getTab_(ss, 'TRACKER');
-  var row = findRowById_(sheet, 'TrackerID', payload.trackerId);
-  if (row < 0) throw new Error('Tracker row not found');
+  var sheet = getTab_(ss, 'MATERIALS_CONFIG');
+  var existingIds = rowsToObjects_(sheet).map(function (r) { return r.MaterialID; });
+  var materialId = nextId_('MAT', existingIds);
+  sheet.appendRow([
+    materialId, payload.category, payload.name, payload.unit,
+    Number(payload.rate) || 0, payload.agency, true, new Date()
+  ]);
+  return { materialId: materialId };
+}
+
+function updateMaterial(payload) {
+  // payload: { materialId, category, name, unit, rate, agency, active }
+  var ss = getSS_();
+  var sheet = getTab_(ss, 'MATERIALS_CONFIG');
+  var row = findRowById_(sheet, 'MaterialID', payload.materialId);
+  if (row < 0) throw new Error('Material not found');
+  var headers = sheet.getDataRange().getValues()[0];
+  var current = sheet.getRange(row, 1, 1, headers.length).getValues()[0];
+  var map = { Category: 'category', Name: 'name', Unit: 'unit', Rate: 'rate', Agency: 'agency', Active: 'active' };
+  headers.forEach(function (h, i) {
+    if (map[h] && payload[map[h]] !== undefined) {
+      current[i] = (h === 'Rate') ? Number(payload[map[h]]) : payload[map[h]];
+    }
+  });
+  sheet.getRange(row, 1, 1, headers.length).setValues([current]);
+  return { ok: true };
+}
+
+// ---------- BOQ line items ----------
+
+function addBoqItem(payload) {
+  // payload: { projectId, spaceId, materialId, quantity }
+  var ss = getSS_();
+  var matSheet = getTab_(ss, 'MATERIALS_CONFIG');
+  var material = rowsToObjects_(matSheet).filter(function (m) { return m.MaterialID === payload.materialId; })[0];
+  if (!material) throw new Error('Material not found');
+
+  var qty = Number(payload.quantity) || 0;
+  var rate = Number(material.Rate) || 0;
+  var amount = qty * rate;
+  var stages = STAGES.map(function (stageName) {
+    return { stage: stageName, status: 'Not Started', target: '', actual: '', note: '' };
+  });
+
+  var boqSheet = getTab_(ss, 'BOQ_ITEMS');
+  var boqItemId = 'BOQ-' + Utilities.getUuid().slice(0, 6);
+  var now = new Date();
+  boqSheet.appendRow([
+    boqItemId, payload.projectId, payload.spaceId, material.MaterialID, material.Name, material.Category, material.Agency,
+    material.Unit, qty, rate, amount, JSON.stringify(DEFAULT_SPLIT), 0, 0, '', 'Pending',
+    JSON.stringify(stages), 'Not Started', '', now, now
+  ]);
+  return { boqItemId: boqItemId };
+}
+
+function updateBoqItem(payload) {
+  // payload: { boqItemId, quantity?, invoiced?, received?, dueDate?, status?, split?, notes? }
+  var ss = getSS_();
+  var sheet = getTab_(ss, 'BOQ_ITEMS');
+  var row = findRowById_(sheet, 'BoqItemID', payload.boqItemId);
+  if (row < 0) throw new Error('BOQ item not found');
+  var headers = sheet.getDataRange().getValues()[0];
+  var current = sheet.getRange(row, 1, 1, headers.length).getValues()[0];
+  var idx = {};
+  headers.forEach(function (h, i) { idx[h] = i; });
+
+  if (payload.quantity !== undefined) {
+    current[idx.Quantity] = Number(payload.quantity);
+    current[idx.Amount] = Number(payload.quantity) * Number(current[idx.Rate]);
+  }
+  if (payload.split !== undefined) current[idx.SplitJSON] = JSON.stringify(payload.split);
+  if (payload.invoiced !== undefined) current[idx.Invoiced] = Number(payload.invoiced);
+  if (payload.received !== undefined) current[idx.Received] = Number(payload.received);
+  if (payload.dueDate !== undefined) current[idx.DueDate] = payload.dueDate;
+  if (payload.status !== undefined) current[idx.PaymentStatus] = payload.status;
+  if (payload.notes !== undefined) current[idx.Notes] = payload.notes;
+  current[idx.UpdatedAt] = new Date();
+  sheet.getRange(row, 1, 1, headers.length).setValues([current]);
+  return { ok: true };
+}
+
+function updateStage(payload) {
+  // payload: { boqItemId, stage, status, target, actual, note }
+  var ss = getSS_();
+  var sheet = getTab_(ss, 'BOQ_ITEMS');
+  var row = findRowById_(sheet, 'BoqItemID', payload.boqItemId);
+  if (row < 0) throw new Error('BOQ item not found');
   var headers = sheet.getDataRange().getValues()[0];
   var stagesColIdx = headers.indexOf('StagesJSON');
   var rollupColIdx = headers.indexOf('RollupStatus');
@@ -481,26 +790,7 @@ function updateStage(payload) {
   return { rollup: rollup, stages: stages };
 }
 
-function updateCashflow(payload) {
-  // payload: { cashflowId, boqValue, split, invoiced, received, dueDate, status }
-  var ss = getSS_();
-  var sheet = getTab_(ss, 'CASHFLOW');
-  var row = findRowById_(sheet, 'CashflowID', payload.cashflowId);
-  if (row < 0) throw new Error('Cashflow row not found');
-  var headers = sheet.getDataRange().getValues()[0];
-  var current = sheet.getRange(row, 1, 1, headers.length).getValues()[0];
-  var idx = {};
-  headers.forEach(function (h, i) { idx[h] = i; });
-  if (payload.boqValue !== undefined) current[idx.BOQValue] = Number(payload.boqValue);
-  if (payload.split !== undefined) current[idx.SplitJSON] = JSON.stringify(payload.split);
-  if (payload.invoiced !== undefined) current[idx.Invoiced] = Number(payload.invoiced);
-  if (payload.received !== undefined) current[idx.Received] = Number(payload.received);
-  if (payload.dueDate !== undefined) current[idx.DueDate] = payload.dueDate;
-  if (payload.status !== undefined) current[idx.PaymentStatus] = payload.status;
-  current[idx.UpdatedAt] = new Date();
-  sheet.getRange(row, 1, 1, headers.length).setValues([current]);
-  return { ok: true };
-}
+// ---------- Daily log ----------
 
 function addDailyLog(payload) {
   // payload: { date, projectId, spaceId, entry, loggedBy, hasBlocker }
@@ -528,14 +818,14 @@ function checkOverdueAndNotify() {
   var data = getAllData();
   var today = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd');
   var lines = [];
-  data.tracker.forEach(function (r) {
+  data.boqItems.forEach(function (r) {
     var sp = data.spaces.filter(function (s) { return s.SpaceID === r.SpaceID; })[0];
     var proj = data.projects.filter(function (p) { return p.ProjectID === r.ProjectID; })[0];
     r.Stages.forEach(function (s) {
       var isOverdue = s.target && s.target < today && s.status !== 'Done' && s.status !== 'N/A';
       if (s.status === 'Delayed' || isOverdue) {
         lines.push((proj ? proj.Name : '') + ' — ' + (sp ? sp.Name : '') + ' — ' +
-          r.Category + ' / ' + r.SubItem + ' (' + s.stage + '): ' +
+          r.Category + ' / ' + r.MaterialName + ' (' + s.stage + '): ' +
           (s.status === 'Delayed' ? 'marked Delayed' : 'overdue, target was ' + s.target));
       }
     });

@@ -72,6 +72,7 @@
   .new-project-card{border:2px dashed var(--line);display:flex;align-items:center;justify-content:center;
     color:var(--ink-soft);font-weight:600;font-size:13px;cursor:pointer;min-height:120px;}
   .new-project-card:hover{border-color:var(--accent);color:var(--accent);}
+  .toolbar-row{display:flex;justify-content:flex-end;gap:8px;margin-bottom:14px;}
 
   /* ---------- Status chips / cells ---------- */
   .status-chip{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:20px;
@@ -81,6 +82,11 @@
   .status-chip.Delayed{background:var(--delayed-bg);color:var(--delayed);}
   .status-chip.Not-Started{background:var(--notstarted-bg);color:var(--notstarted);}
   .status-chip.N-A{background:var(--na-bg);color:var(--na);}
+  .status-chip.Partial{background:var(--progress-bg);color:var(--progress);}
+  .status-chip.Pending{background:var(--notstarted-bg);color:var(--notstarted);}
+  .status-chip.Paid{background:var(--done-bg);color:var(--done);}
+  .agency-chip{display:inline-block;padding:2px 8px;border-radius:20px;font-size:10.5px;font-weight:600;
+    background:var(--na-bg);color:var(--na);}
   .dot{width:7px;height:7px;border-radius:50%;background:currentColor;}
 
   .stat-strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:16px;}
@@ -91,7 +97,7 @@
   .stat-box .value.red{color:var(--delayed);}
 
   .section-title{font-size:13px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-soft);
-    font-weight:700;margin:22px 0 10px;}
+    font-weight:700;margin:22px 0 10px;display:flex;align-items:center;justify-content:space-between;}
   .section-title:first-child{margin-top:0;}
 
   /* ---------- Filters ---------- */
@@ -99,9 +105,9 @@
   .filters select, .filters input[type=text]{padding:7px 10px;border:1px solid var(--line);border-radius:7px;
     font-size:12.5px;background:#fff;color:var(--ink);}
 
-  /* ---------- Tracker grid ---------- */
+  /* ---------- Tracker / BOQ grid ---------- */
   .space-block{margin-bottom:26px;}
-  .space-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;}
+  .space-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;gap:10px;flex-wrap:wrap;}
   .space-head h3{font-size:15px;}
   .table-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:var(--radius);background:#fff;}
   table.tracker{border-collapse:collapse;width:100%;font-size:12.5px;}
@@ -109,9 +115,10 @@
     letter-spacing:.03em;color:var(--ink-soft);border-bottom:1px solid var(--line);white-space:nowrap;}
   table.tracker td{padding:6px 8px;border-bottom:1px solid #f0ede6;vertical-align:middle;white-space:nowrap;}
   table.tracker tr:last-child td{border-bottom:none;}
-  table.tracker td.subitem-cell{white-space:normal;min-width:170px;}
+  table.tracker td.subitem-cell{white-space:normal;min-width:190px;}
   .subitem-cell .cat{display:block;font-size:10.5px;color:var(--ink-soft);font-weight:600;text-transform:uppercase;
     letter-spacing:.03em;}
+  .subitem-cell .agency-chip{margin-top:3px;}
   .stage-cell{width:44px;height:26px;border-radius:6px;cursor:pointer;border:1px solid transparent;
     display:flex;align-items:center;justify-content:center;position:relative;}
   .stage-cell.Done{background:var(--done);}
@@ -122,6 +129,7 @@
   .stage-cell.overdue::after{content:"!";position:absolute;top:-5px;right:-5px;background:var(--delayed);
     color:#fff;width:14px;height:14px;border-radius:50%;font-size:10px;line-height:14px;text-align:center;font-weight:800;}
   .stage-cell:hover{outline:2px solid var(--ink);outline-offset:1px;}
+  .add-material-row{padding:10px;border-top:1px dashed var(--line);}
 
   /* ---------- Buttons ---------- */
   .btn{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:7px;border:1px solid var(--line);
@@ -139,6 +147,7 @@
     border-radius:7px;font-size:13.5px;background:#fff;color:var(--ink);}
   .field textarea{min-height:70px;resize:vertical;}
   .field-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  .field-hint{font-size:11.5px;color:var(--ink-soft);margin-top:4px;}
   .modal-overlay{position:fixed;inset:0;background:rgba(28,33,40,.5);display:flex;align-items:center;
     justify-content:center;z-index:100;padding:16px;}
   .modal{background:#fff;border-radius:12px;padding:20px;width:100%;max-width:440px;max-height:90vh;overflow-y:auto;
@@ -216,7 +225,8 @@ var STATE = {
   currentTab: null,
   loggedByName: localStorage.getItem('pmc_logged_by') || '',
   filters: { space:'', category:'', stage:'', status:'' },
-  locked: false             // true when opened via a client share link — can't switch role/project
+  locked: false,             // true when opened via a client share link — can't switch role/project
+  showCatalog: false         // Materials Catalog screen (Admin, not project-scoped)
 };
 
 // A share link like ?project=P-001&role=client locks a visitor to that single
@@ -298,21 +308,16 @@ function spacesOf(projectId){
   return STATE.data.spaces.filter(function(s){return s.ProjectID===projectId;})
     .sort(function(a,b){return (a.SortOrder||0)-(b.SortOrder||0);});
 }
-function trackerOf(projectId, spaceId){
-  return STATE.data.tracker.filter(function(t){
+function boqItemsOf(projectId, spaceId){
+  return STATE.data.boqItems.filter(function(t){
     return t.ProjectID===projectId && (!spaceId || t.SpaceID===spaceId);
-  });
-}
-function cashflowOf(projectId, spaceId){
-  return STATE.data.cashflow.filter(function(c){
-    return c.ProjectID===projectId && (!spaceId || c.SpaceID===spaceId);
   });
 }
 function logsOf(projectId){
   return STATE.data.dailyLog.filter(function(l){return l.ProjectID===projectId;});
 }
 function projectPct(projectId){
-  var rows = trackerOf(projectId);
+  var rows = boqItemsOf(projectId);
   if(!rows.length) return 0;
   var total=0, done=0;
   rows.forEach(function(r){
@@ -321,7 +326,7 @@ function projectPct(projectId){
   return total ? Math.round(done/total*100) : 0;
 }
 function spacePct(projectId, spaceId){
-  var rows = trackerOf(projectId, spaceId);
+  var rows = boqItemsOf(projectId, spaceId);
   var total=0, done=0;
   rows.forEach(function(r){ r.Stages.forEach(function(s){ total++; if(s.status==='Done'||s.status==='N/A') done++; }); });
   return total? Math.round(done/total*100) : 0;
@@ -333,11 +338,11 @@ function isOverdue(stage){
 }
 function delayedItems(projectId){
   var out = [];
-  trackerOf(projectId).forEach(function(r){
+  boqItemsOf(projectId).forEach(function(r){
     var sp = STATE.data.spaces.filter(function(s){return s.SpaceID===r.SpaceID;})[0];
     r.Stages.forEach(function(s){
       if(s.status==='Delayed' || isOverdue(s)){
-        out.push({space: sp?sp.Name:'', category:r.Category, subItem:r.SubItem, stage:s.stage,
+        out.push({space: sp?sp.Name:'', category:r.Category, material:r.MaterialName, stage:s.stage,
           status:s.status, target:s.target, overdue:isOverdue(s)});
       }
     });
@@ -345,13 +350,13 @@ function delayedItems(projectId){
   return out;
 }
 function projectCashSummary(projectId){
-  var rows = cashflowOf(projectId);
+  var rows = boqItemsOf(projectId);
   var boq=0, inv=0, rec=0;
-  rows.forEach(function(r){ boq+=Number(r.BOQValue)||0; inv+=Number(r.Invoiced)||0; rec+=Number(r.Received)||0; });
+  rows.forEach(function(r){ boq+=Number(r.Amount)||0; inv+=Number(r.Invoiced)||0; rec+=Number(r.Received)||0; });
   return { boq:boq, invoiced:inv, received:rec, outstanding: inv-rec };
 }
 function nextPaymentDue(projectId){
-  var rows = cashflowOf(projectId).filter(function(r){
+  var rows = boqItemsOf(projectId).filter(function(r){
     return r.DueDate && (Number(r.Invoiced)-Number(r.Received) > 0);
   });
   rows.sort(function(a,b){ return new Date(a.DueDate)-new Date(b.DueDate); });
@@ -369,7 +374,11 @@ function render(){
   renderRoleSwitch();
   if(!STATE.currentProjectId){
     document.getElementById('belowBar').innerHTML = '';
-    renderProjectList();
+    if(STATE.showCatalog && STATE.role==='admin'){
+      document.getElementById('content').innerHTML = renderMaterialsCatalogView();
+    } else {
+      renderProjectList();
+    }
   } else {
     renderBelowBar();
     renderProjectContent();
@@ -386,6 +395,7 @@ function setRole(r){
   if(STATE.locked) return;
   STATE.role = r;
   STATE.currentTab = null;
+  STATE.showCatalog = false;
   render();
 }
 function goHome(){
@@ -428,7 +438,11 @@ function setTab(t){ STATE.currentTab = t; render(); }
 
 // ============================= RENDER: PROJECT LIST =============================
 function renderProjectList(){
-  var html = '<div class="section-title">Projects</div><div class="grid-cards">';
+  var html = '';
+  if(STATE.role==='admin'){
+    html += '<div class="toolbar-row"><button class="btn" onclick="openCatalog()">Manage Materials Catalog</button></div>';
+  }
+  html += '<div class="section-title">Projects</div><div class="grid-cards">';
   STATE.data.projects.forEach(function(p){
     var pct = projectPct(p.ProjectID);
     var dtm = daysToMoveIn(p);
@@ -446,9 +460,17 @@ function renderProjectList(){
   }
   html += '</div>';
   if(!STATE.data.projects.length){
-    html = '<div class="empty-state">No projects yet.'+(STATE.role==='admin'?' Click below to add one.':'')+'</div>' + html;
+    html += '<div class="empty-state">No projects yet.'+(STATE.role==='admin'?' Click below to add one.':'')+'</div>';
   }
   document.getElementById('content').innerHTML = html;
+}
+function openCatalog(){
+  STATE.showCatalog = true;
+  render();
+}
+function closeCatalog(){
+  STATE.showCatalog = false;
+  render();
 }
 
 // ============================= RENDER: PROJECT CONTENT ROUTER =============================
@@ -494,9 +516,9 @@ function renderReviewView(){
 
   if(delayed.length){
     html += '<div class="section-title">Delayed / Overdue</div><div class="table-wrap"><table class="tracker"><thead><tr>'+
-      '<th>Space</th><th>Category</th><th>Sub-item</th><th>Stage</th><th>Status</th><th>Target</th></tr></thead><tbody>';
+      '<th>Space</th><th>Category</th><th>Material</th><th>Stage</th><th>Status</th><th>Target</th></tr></thead><tbody>';
     delayed.forEach(function(d){
-      html += '<tr><td>'+escapeHtml(d.space)+'</td><td>'+escapeHtml(d.category)+'</td><td>'+escapeHtml(d.subItem)+'</td>'+
+      html += '<tr><td>'+escapeHtml(d.space)+'</td><td>'+escapeHtml(d.category)+'</td><td>'+escapeHtml(d.material)+'</td>'+
         '<td>'+escapeHtml(d.stage)+'</td><td><span class="status-chip '+cls(d.status)+'">'+
         (d.overdue && d.status!=='Delayed' ? 'Overdue' : d.status)+'</span></td><td>'+fmtDate(d.target)+'</td></tr>';
     });
@@ -508,7 +530,7 @@ function statBox(label, value, tone){
   return '<div class="stat-box"><div class="label">'+label+'</div><div class="value '+(tone||'')+'">'+value+'</div></div>';
 }
 function categoryChipRow(pid, spaceId){
-  var rows = trackerOf(pid, spaceId);
+  var rows = boqItemsOf(pid, spaceId);
   var byCat = {};
   rows.forEach(function(r){
     if(!byCat[r.Category]) byCat[r.Category] = [];
@@ -524,10 +546,11 @@ function categoryChipRow(pid, spaceId){
     else worst='Not Started';
     html += '<span class="status-chip '+cls(worst)+'"><span class="dot"></span>'+escapeHtml(cat)+'</span>';
   });
+  if(!Object.keys(byCat).length) html += '<span style="font-size:12px;color:var(--ink-soft);">No BOQ items yet</span>';
   return html + '</div>';
 }
 
-// ============================= TRACKER / PLANNING GRID =============================
+// ============================= TRACKER / PLANNING GRID (BOQ) =============================
 function renderTrackerView(editable){
   var pid = STATE.currentProjectId;
   var spaces = spacesOf(pid);
@@ -537,28 +560,35 @@ function renderTrackerView(editable){
     html += filterBar();
   }
   spaces.forEach(function(sp){
-    var rows = trackerOf(pid, sp.SpaceID).filter(function(r){
+    if(STATE.filters.space && STATE.filters.space!==sp.SpaceID) return;
+    var rows = boqItemsOf(pid, sp.SpaceID).filter(function(r){
       if(STATE.filters.category && r.Category!==STATE.filters.category) return false;
       return true;
     });
-    if(STATE.filters.space && STATE.filters.space!==sp.SpaceID) return;
     html += '<div class="space-block"><div class="space-head"><h3>'+escapeHtml(sp.Name)+'</h3>'+
       '<span class="badge ok">'+spacePct(pid, sp.SpaceID)+'% complete</span></div>';
-    html += '<div class="table-wrap"><table class="tracker"><thead><tr><th>Sub-item</th>';
+    html += '<div class="table-wrap"><table class="tracker"><thead><tr><th>Material</th><th>Unit</th><th>Qty</th><th>Amount</th>';
     schema.stages.forEach(function(st){ html += '<th style="text-align:center">'+st+'</th>'; });
     html += '</tr></thead><tbody>';
     rows.forEach(function(r){
-      html += '<tr><td class="subitem-cell"><span class="cat">'+escapeHtml(r.Category)+'</span>'+escapeHtml(r.SubItem)+'</td>';
+      html += '<tr><td class="subitem-cell"><span class="cat">'+escapeHtml(r.Category)+'</span>'+escapeHtml(r.MaterialName)+
+        '<span class="agency-chip">'+escapeHtml(r.Agency)+'</span></td>'+
+        '<td>'+escapeHtml(r.Unit)+'</td><td>'+r.Quantity+'</td><td>'+fmtMoney(r.Amount)+'</td>';
       r.Stages.forEach(function(s){
         var overdueFlag = isOverdue(s) ? ' overdue' : '';
         var title = s.stage+': '+s.status+(s.target? ' · target '+fmtDate(s.target):'')+(s.note? ' · '+s.note:'');
         html += '<td style="text-align:center"><div class="stage-cell '+cls(s.status)+overdueFlag+'" title="'+escapeHtml(title)+'" '+
-          (editable? 'onclick="openStageModal(\''+r.TrackerID+'\',\''+s.stage+'\')"' : 'onclick="openStageModal(\''+r.TrackerID+'\',\''+s.stage+'\',true)"')+
+          (editable? 'onclick="openStageModal(\''+r.BoqItemID+'\',\''+s.stage+'\')"' : 'onclick="openStageModal(\''+r.BoqItemID+'\',\''+s.stage+'\',true)"')+
           '></div></td>';
       });
       html += '</tr>';
     });
-    html += '</tbody></table></div></div>';
+    html += '</tbody></table>';
+    if(STATE.role==='admin'){
+      html += '<div class="add-material-row"><button class="btn small" onclick="openAddMaterialModal(\''+sp.SpaceID+'\')">+ Add Material</button></div>';
+    }
+    html += '</div></div>';
+    if(!rows.length && STATE.role!=='admin') html += '<div class="empty-state" style="padding:20px;">No BOQ items in this space yet.</div>';
   });
   if(!spaces.length) html += '<div class="empty-state">No spaces yet.</div>';
   return html;
@@ -577,13 +607,13 @@ function filterBar(){
   return html;
 }
 
-function openStageModal(trackerId, stageName, readOnly){
-  var row = STATE.data.tracker.filter(function(t){return t.TrackerID===trackerId;})[0];
+function openStageModal(boqItemId, stageName, readOnly){
+  var row = STATE.data.boqItems.filter(function(t){return t.BoqItemID===boqItemId;})[0];
   var stage = row.Stages.filter(function(s){return s.stage===stageName;})[0];
   var space = STATE.data.spaces.filter(function(s){return s.SpaceID===row.SpaceID;})[0];
   var body =
-    '<h3>'+escapeHtml(row.SubItem)+' &mdash; '+escapeHtml(stageName)+'</h3>'+
-    '<div style="font-size:12px;color:var(--ink-soft);margin-bottom:14px;">'+escapeHtml(space?space.Name:'')+' &middot; '+escapeHtml(row.Category)+'</div>'+
+    '<h3>'+escapeHtml(row.MaterialName)+' &mdash; '+escapeHtml(stageName)+'</h3>'+
+    '<div style="font-size:12px;color:var(--ink-soft);margin-bottom:14px;">'+escapeHtml(space?space.Name:'')+' &middot; '+escapeHtml(row.Category)+' &middot; '+escapeHtml(row.Agency)+'</div>'+
     '<div class="field"><label>Status</label><select id="m-status" '+(readOnly?'disabled':'')+'>'+
       STATUS_LIST.map(function(s){return '<option value="'+s+'" '+(stage.status===s?'selected':'')+'>'+s+'</option>';}).join('')+
     '</select></div>'+
@@ -594,13 +624,13 @@ function openStageModal(trackerId, stageName, readOnly){
     '<div class="field"><label>Note</label><textarea id="m-note" '+(readOnly?'disabled':'')+'>'+escapeHtml(stage.note||'')+'</textarea></div>'+
     '<div class="modal-actions">'+
       '<button class="btn" onclick="closeModal()">'+(readOnly?'Close':'Cancel')+'</button>'+
-      (readOnly? '' : '<button class="btn primary" onclick="saveStage(\''+trackerId+'\',\''+stageName+'\')">Save</button>')+
+      (readOnly? '' : '<button class="btn primary" onclick="saveStage(\''+boqItemId+'\',\''+stageName+'\')">Save</button>')+
     '</div>';
   showModal(body);
 }
-function saveStage(trackerId, stageName){
+function saveStage(boqItemId, stageName){
   var payload = {
-    trackerId: trackerId, stage: stageName,
+    boqItemId: boqItemId, stage: stageName,
     status: document.getElementById('m-status').value,
     target: document.getElementById('m-target').value,
     actual: document.getElementById('m-actual').value,
@@ -608,6 +638,57 @@ function saveStage(trackerId, stageName){
   };
   apiPost('updateStage', payload).then(function(){
     closeModal(); toast('Saved'); refresh();
+  }).catch(showErr);
+}
+
+// ============================= ADD MATERIAL TO SPACE =============================
+function openAddMaterialModal(spaceId){
+  var cats = STATE.data.schema.categories;
+  var body = '<h3>Add Material</h3>'+
+    '<div class="field"><label>Category</label><select id="am-cat" onchange="renderAmMaterialOptions()">'+
+      cats.map(function(c){return '<option value="'+escapeHtml(c)+'">'+escapeHtml(c)+'</option>';}).join('')+
+    '</select></div>'+
+    '<div class="field"><label>Material</label><select id="am-material" onchange="renderAmDetails()"></select></div>'+
+    '<div class="field-row">'+
+      '<div class="field"><label>Unit</label><input id="am-unit" readonly></div>'+
+      '<div class="field"><label>Rate</label><input id="am-rate" readonly></div>'+
+    '</div>'+
+    '<div class="field"><label>Agency</label><input id="am-agency" readonly></div>'+
+    '<div class="field"><label>Quantity</label><input type="number" id="am-qty" value="1" min="0" step="any" oninput="renderAmAmount()"></div>'+
+    '<div class="field-hint">Amount: <b id="am-amount">&mdash;</b></div>'+
+    '<div class="modal-actions"><button class="btn" onclick="closeModal()">Cancel</button>'+
+    '<button class="btn primary" onclick="saveAddMaterial(\''+spaceId+'\')">Add to BOQ</button></div>';
+  showModal(body);
+  renderAmMaterialOptions();
+}
+function renderAmMaterialOptions(){
+  var cat = document.getElementById('am-cat').value;
+  var mats = STATE.data.materialsConfig.filter(function(m){ return m.Category===cat; });
+  document.getElementById('am-material').innerHTML = mats.map(function(m){
+    return '<option value="'+m.MaterialID+'">'+escapeHtml(m.Name)+' ('+fmtMoney(m.Rate)+'/'+escapeHtml(m.Unit)+')</option>';
+  }).join('');
+  renderAmDetails();
+}
+function renderAmDetails(){
+  var matId = document.getElementById('am-material').value;
+  var mat = STATE.data.materialsConfig.filter(function(m){ return m.MaterialID===matId; })[0];
+  document.getElementById('am-unit').value = mat ? mat.Unit : '';
+  document.getElementById('am-rate').value = mat ? mat.Rate : '';
+  document.getElementById('am-agency').value = mat ? mat.Agency : '';
+  renderAmAmount();
+}
+function renderAmAmount(){
+  var rate = Number(document.getElementById('am-rate').value)||0;
+  var qty = Number(document.getElementById('am-qty').value)||0;
+  document.getElementById('am-amount').textContent = fmtMoney(rate*qty);
+}
+function saveAddMaterial(spaceId){
+  var materialId = document.getElementById('am-material').value;
+  var qty = Number(document.getElementById('am-qty').value)||0;
+  if(!materialId){ toast('Pick a material'); return; }
+  if(!qty){ toast('Enter a quantity'); return; }
+  apiPost('addBoqItem', { projectId: STATE.currentProjectId, spaceId: spaceId, materialId: materialId, quantity: qty }).then(function(){
+    closeModal(); toast('Added to BOQ'); refresh();
   }).catch(showErr);
 }
 
@@ -624,33 +705,39 @@ function renderCashflowView(){
     '</div>';
 
   spaces.forEach(function(sp){
-    var rows = cashflowOf(pid, sp.SpaceID);
+    var rows = boqItemsOf(pid, sp.SpaceID);
+    if(!rows.length) return;
     html += '<div class="section-title">'+escapeHtml(sp.Name)+'</div>';
     html += '<div class="table-wrap"><table class="tracker"><thead><tr>'+
-      '<th>Category</th><th>BOQ Value</th><th>Split (Order/Delivery/Install)</th><th>Invoiced</th><th>Received</th>'+
+      '<th>Material</th><th>Qty</th><th>Amount</th><th>Split (Order/Delivery/Install)</th><th>Invoiced</th><th>Received</th>'+
       '<th>Due Date</th><th>Status</th><th></th></tr></thead><tbody>';
     rows.forEach(function(r){
       var s = r.Split||{};
       html += '<tr>'+
-        '<td>'+escapeHtml(r.Category)+'</td>'+
-        '<td>'+fmtMoney(r.BOQValue)+'</td>'+
+        '<td>'+escapeHtml(r.MaterialName)+'</td>'+
+        '<td>'+r.Quantity+'</td>'+
+        '<td>'+fmtMoney(r.Amount)+'</td>'+
         '<td>'+ (s['Order Placement']||0)+'% / '+(s['Delivery']||0)+'% / '+(s['Installation']||0)+'%</td>'+
         '<td>'+fmtMoney(r.Invoiced)+'</td>'+
         '<td>'+fmtMoney(r.Received)+'</td>'+
         '<td>'+fmtDate(r.DueDate)+'</td>'+
         '<td><span class="status-chip '+cls(r.PaymentStatus||'Pending')+'">'+(r.PaymentStatus||'Pending')+'</span></td>'+
-        '<td><button class="btn small" onclick="openCashflowModal(\''+r.CashflowID+'\')">Edit</button></td>'+
+        '<td><button class="btn small" onclick="openCashflowModal(\''+r.BoqItemID+'\')">Edit</button></td>'+
         '</tr>';
     });
     html += '</tbody></table></div>';
   });
+  if(!cash.boq) html += '<div class="empty-state">No BOQ items yet — add materials in the Planning tab first.</div>';
   return html;
 }
-function openCashflowModal(cashflowId){
-  var r = STATE.data.cashflow.filter(function(c){return c.CashflowID===cashflowId;})[0];
+function openCashflowModal(boqItemId){
+  var r = STATE.data.boqItems.filter(function(c){return c.BoqItemID===boqItemId;})[0];
   var s = r.Split||{};
-  var body = '<h3>'+escapeHtml(r.Category)+' &mdash; Cash Flow</h3>'+
-    '<div class="field"><label>BOQ Value</label><input type="number" id="cf-boq" value="'+(r.BOQValue||0)+'"></div>'+
+  var body = '<h3>'+escapeHtml(r.MaterialName)+' &mdash; Cash Flow</h3>'+
+    '<div class="field-row">'+
+      '<div class="field"><label>Quantity</label><input type="number" id="cf-qty" value="'+(r.Quantity||0)+'"></div>'+
+      '<div class="field"><label>Rate</label><input id="cf-rate" value="'+fmtMoney(r.Rate)+'" readonly></div>'+
+    '</div>'+
     '<div class="field-row">'+
       '<div class="field"><label>% at Order Placement</label><input type="number" id="cf-s1" value="'+(s['Order Placement']||0)+'"></div>'+
       '<div class="field"><label>% at Delivery</label><input type="number" id="cf-s2" value="'+(s['Delivery']||0)+'"></div>'+
@@ -667,13 +754,13 @@ function openCashflowModal(cashflowId){
       '</select></div>'+
     '</div>'+
     '<div class="modal-actions"><button class="btn" onclick="closeModal()">Cancel</button>'+
-    '<button class="btn primary" onclick="saveCashflow(\''+cashflowId+'\')">Save</button></div>';
+    '<button class="btn primary" onclick="saveCashflow(\''+boqItemId+'\')">Save</button></div>';
   showModal(body);
 }
-function saveCashflow(cashflowId){
+function saveCashflow(boqItemId){
   var payload = {
-    cashflowId: cashflowId,
-    boqValue: document.getElementById('cf-boq').value,
+    boqItemId: boqItemId,
+    quantity: document.getElementById('cf-qty').value,
     split: {
       'Order Placement': Number(document.getElementById('cf-s1').value)||0,
       'Delivery': Number(document.getElementById('cf-s2').value)||0,
@@ -684,7 +771,7 @@ function saveCashflow(cashflowId){
     dueDate: document.getElementById('cf-due').value,
     status: document.getElementById('cf-status').value
   };
-  apiPost('updateCashflow', payload).then(function(){
+  apiPost('updateBoqItem', payload).then(function(){
     closeModal(); toast('Saved'); refresh();
   }).catch(showErr);
 }
@@ -753,15 +840,15 @@ function renderReportView(){
   var delayed = delayedItems(pid);
   var weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate()-7);
   var completions = [];
-  trackerOf(pid).forEach(function(r){
+  boqItemsOf(pid).forEach(function(r){
     r.Stages.forEach(function(s){
       if(s.status==='Done' && s.actual && new Date(s.actual) >= weekAgo){
         var sp = STATE.data.spaces.filter(function(x){return x.SpaceID===r.SpaceID;})[0];
-        completions.push((sp?sp.Name+' &mdash; ':'')+r.SubItem+' ('+s.stage+') &mdash; '+fmtDate(s.actual));
+        completions.push((sp?sp.Name+' &mdash; ':'')+r.MaterialName+' ('+s.stage+') &mdash; '+fmtDate(s.actual));
       }
     });
   });
-  var dues = cashflowOf(pid).filter(function(r){ return Number(r.Invoiced)-Number(r.Received) > 0; });
+  var dues = boqItemsOf(pid).filter(function(r){ return Number(r.Invoiced)-Number(r.Received) > 0; });
 
   var html = '<div class="no-print" style="margin-bottom:14px;"><button class="btn primary" onclick="window.print()">Print / Export</button></div>';
   html += '<div class="report-card">'+
@@ -778,12 +865,12 @@ function renderReportView(){
   html += '<div class="section-title">Delayed Items</div>';
   html += delayed.length ? '<ul class="plain">'+delayed.map(function(d){
       var sp = d.space;
-      return '<li>'+escapeHtml(sp)+' &mdash; '+escapeHtml(d.subItem)+' ('+escapeHtml(d.stage)+') &mdash; '+ (d.overdue&&d.status!=='Delayed'?'overdue, target was '+fmtDate(d.target):'marked delayed')+'</li>';
+      return '<li>'+escapeHtml(sp)+' &mdash; '+escapeHtml(d.material)+' ('+escapeHtml(d.stage)+') &mdash; '+ (d.overdue&&d.status!=='Delayed'?'overdue, target was '+fmtDate(d.target):'marked delayed')+'</li>';
     }).join('')+'</ul>' : '<p style="color:var(--ink-soft);font-size:13px;">None &mdash; on track.</p>';
 
   html += '<div class="section-title">Upcoming Payments</div>';
   html += dues.length ? '<ul class="plain">'+dues.map(function(d){
-      return '<li>'+escapeHtml(d.Category)+' &mdash; '+fmtMoney(Number(d.Invoiced)-Number(d.Received))+' due '+fmtDate(d.DueDate)+'</li>';
+      return '<li>'+escapeHtml(d.MaterialName)+' &mdash; '+fmtMoney(Number(d.Invoiced)-Number(d.Received))+' due '+fmtDate(d.DueDate)+'</li>';
     }).join('')+'</ul>' : '<p style="color:var(--ink-soft);font-size:13px;">No payments currently due.</p>';
 
   html += '</div>';
@@ -816,7 +903,7 @@ function renderManageView(){
   html += '<div class="space-adder" style="margin-top:10px;">'+
     '<input type="text" id="mg-newspace" placeholder="New space name (e.g. Kitchen)">'+
     '<button class="btn" onclick="addSpaceToProject()">Add Space</button></div>'+
-    '<div style="font-size:11.5px;color:var(--ink-soft);">Adding a space auto-generates the full 18-item &times; 6-stage tracker and cash flow rows for it.</div>'+
+    '<div style="font-size:11.5px;color:var(--ink-soft);">A new space starts empty &mdash; add materials to it from the Planning tab (pick from the Materials Catalog, enter quantity).</div>'+
     '</div>';
 
   var clientLink = window.location.origin + window.location.pathname + '?project=' + pid + '&role=client';
@@ -855,6 +942,79 @@ function addSpaceToProject(){
   if(!name){ toast('Enter a space name'); return; }
   apiPost('addSpace', { projectId: STATE.currentProjectId, name: name }).then(function(){
     toast('Space added'); refresh();
+  }).catch(showErr);
+}
+
+// ============================= MATERIALS CATALOG (Admin, global) =============================
+function renderMaterialsCatalogView(){
+  var mats = STATE.data.materialsConfig;
+  var byCat = {};
+  mats.forEach(function(m){ (byCat[m.Category]=byCat[m.Category]||[]).push(m); });
+  var html = '<div class="toolbar-row"><button class="btn" onclick="closeCatalog()">&larr; Back to Projects</button>'+
+    '<button class="btn primary" onclick="openAddMaterialToCatalogModal()">+ Add Material</button></div>';
+  html += '<div class="section-title">Materials Catalog<span style="font-weight:400;text-transform:none;letter-spacing:0;">'+mats.length+' materials, shared across all projects</span></div>';
+  Object.keys(byCat).sort().forEach(function(cat){
+    html += '<div class="table-wrap" style="margin-bottom:14px;"><table class="tracker"><thead><tr>'+
+      '<th>'+escapeHtml(cat)+'</th><th>Unit</th><th>Rate</th><th>Agency</th><th></th></tr></thead><tbody>';
+    byCat[cat].forEach(function(m){
+      html += '<tr><td>'+escapeHtml(m.Name)+'</td><td>'+escapeHtml(m.Unit)+'</td><td>'+fmtMoney(m.Rate)+'</td>'+
+        '<td><span class="agency-chip">'+escapeHtml(m.Agency)+'</span></td>'+
+        '<td><button class="btn small" onclick="openEditMaterialModal(\''+m.MaterialID+'\')">Edit</button></td></tr>';
+    });
+    html += '</tbody></table></div>';
+  });
+  return html;
+}
+function materialFormBody(title, m){
+  var agencies = STATE.data.schema.agencies;
+  return '<h3>'+title+'</h3>'+
+    '<div class="field"><label>Category</label><input id="mt-cat" value="'+escapeHtml(m?m.Category:'')+'" placeholder="e.g. CARPENTRY"></div>'+
+    '<div class="field"><label>Material Name</label><input id="mt-name" value="'+escapeHtml(m?m.Name:'')+'" placeholder="e.g. 19mm Ply"></div>'+
+    '<div class="field-row">'+
+      '<div class="field"><label>Unit</label><input id="mt-unit" value="'+escapeHtml(m?m.Unit:'')+'" placeholder="e.g. Sq. Ft"></div>'+
+      '<div class="field"><label>Rate</label><input type="number" id="mt-rate" value="'+(m?m.Rate:'')+'"></div>'+
+    '</div>'+
+    '<div class="field"><label>Agency</label><select id="mt-agency">'+
+      agencies.map(function(a){return '<option '+(m&&m.Agency===a?'selected':'')+'>'+a+'</option>';}).join('')+
+    '</select></div>';
+}
+function openAddMaterialToCatalogModal(){
+  var body = materialFormBody('Add Material', null)+
+    '<div class="modal-actions"><button class="btn" onclick="closeModal()">Cancel</button>'+
+    '<button class="btn primary" onclick="saveNewMaterial()">Add</button></div>';
+  showModal(body);
+}
+function saveNewMaterial(){
+  var payload = {
+    category: document.getElementById('mt-cat').value.trim(),
+    name: document.getElementById('mt-name').value.trim(),
+    unit: document.getElementById('mt-unit').value.trim(),
+    rate: document.getElementById('mt-rate').value,
+    agency: document.getElementById('mt-agency').value
+  };
+  if(!payload.category || !payload.name || !payload.unit){ toast('Category, name and unit are required'); return; }
+  apiPost('addMaterial', payload).then(function(){
+    closeModal(); toast('Material added'); refresh();
+  }).catch(showErr);
+}
+function openEditMaterialModal(materialId){
+  var m = STATE.data.materialsConfig.filter(function(x){return x.MaterialID===materialId;})[0];
+  var body = materialFormBody('Edit Material', m)+
+    '<div class="modal-actions"><button class="btn" onclick="closeModal()">Cancel</button>'+
+    '<button class="btn primary" onclick="saveEditMaterial(\''+materialId+'\')">Save</button></div>';
+  showModal(body);
+}
+function saveEditMaterial(materialId){
+  var payload = {
+    materialId: materialId,
+    category: document.getElementById('mt-cat').value.trim(),
+    name: document.getElementById('mt-name').value.trim(),
+    unit: document.getElementById('mt-unit').value.trim(),
+    rate: document.getElementById('mt-rate').value,
+    agency: document.getElementById('mt-agency').value
+  };
+  apiPost('updateMaterial', payload).then(function(){
+    closeModal(); toast('Material updated'); refresh();
   }).catch(showErr);
 }
 
