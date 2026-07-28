@@ -1,0 +1,933 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>IDS PMC Tool</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root{
+    --ink:#1c2128; --ink-soft:#4b5563; --paper:#f6f3ee; --card:#ffffff;
+    --line:#e4ddd0; --accent:#c1592b; --accent-dark:#a3461e;
+    --done:#1f8a4c; --done-bg:#e5f5ea;
+    --progress:#c9820a; --progress-bg:#fdf1dc;
+    --delayed:#c33429; --delayed-bg:#fbe6e3;
+    --notstarted:#9a978f; --notstarted-bg:#f0ede6;
+    --na:#7d8794; --na-bg:#eceef1;
+    --shadow: 0 1px 2px rgba(28,33,40,.06), 0 4px 14px rgba(28,33,40,.05);
+    --radius: 10px;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;background:var(--paper);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;}
+  h1,h2,h3,h4{margin:0 0 4px 0; font-weight:650; letter-spacing:-.01em;}
+  a{color:inherit;}
+  button{font-family:inherit;cursor:pointer;}
+  input,select,textarea{font-family:inherit;}
+  .app{min-height:100vh;display:flex;flex-direction:column;}
+
+  /* ---------- Top bar ---------- */
+  .topbar{background:var(--ink);color:#f6f3ee;padding:10px 18px;display:flex;align-items:center;
+    justify-content:space-between;gap:12px;flex-wrap:wrap;position:sticky;top:0;z-index:40;}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:700;letter-spacing:.02em;}
+  .brand .mark{width:28px;height:28px;border-radius:7px;background:var(--accent);
+    display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:800;color:#fff;}
+  .brand small{display:block;font-weight:400;opacity:.65;font-size:11px;margin-top:1px;}
+  .role-switch{display:flex;background:rgba(255,255,255,.08);border-radius:8px;padding:3px;gap:2px;}
+  .role-switch button{background:transparent;border:none;color:#cfd3d8;padding:7px 12px;border-radius:6px;
+    font-size:12.5px;font-weight:600;}
+  .role-switch button.active{background:var(--accent);color:#fff;}
+  .storage-note{font-size:11px;opacity:.55;}
+
+  /* ---------- Breadcrumb / project bar ---------- */
+  .projectbar{background:var(--card);border-bottom:1px solid var(--line);padding:10px 18px;
+    display:flex;align-items:center;gap:14px;flex-wrap:wrap;position:sticky;top:48px;z-index:30;}
+  .back-btn{border:1px solid var(--line);background:#fff;border-radius:7px;padding:6px 10px;font-size:12.5px;
+    font-weight:600;color:var(--ink-soft);}
+  .back-btn:hover{border-color:var(--accent);color:var(--accent);}
+  .projectbar .pname{font-weight:700;font-size:15px;}
+  .projectbar .paddr{font-size:12px;color:var(--ink-soft);}
+  .tabs{display:flex;gap:4px;padding:0 18px;background:var(--card);border-bottom:1px solid var(--line);
+    overflow-x:auto;position:sticky;top:92px;z-index:20;}
+  .tabs button{background:none;border:none;padding:11px 14px;font-size:13px;font-weight:600;color:var(--ink-soft);
+    border-bottom:2.5px solid transparent;white-space:nowrap;}
+  .tabs button.active{color:var(--accent-dark);border-bottom-color:var(--accent);}
+
+  .content{flex:1;padding:18px;max-width:1280px;width:100%;margin:0 auto;}
+
+  /* ---------- Cards / grid ---------- */
+  .grid-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px;}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:16px;
+    box-shadow:var(--shadow);}
+  .proj-card{cursor:pointer;transition:transform .12s, box-shadow .12s;}
+  .proj-card:hover{transform:translateY(-2px);box-shadow:0 6px 20px rgba(28,33,40,.1);}
+  .proj-card .pct-row{display:flex;align-items:center;gap:10px;margin:10px 0 8px;}
+  .pct-bar{flex:1;height:8px;border-radius:5px;background:var(--notstarted-bg);overflow:hidden;}
+  .pct-bar > div{height:100%;background:var(--accent);border-radius:5px;}
+  .pct-num{font-size:13px;font-weight:700;color:var(--accent-dark);width:38px;text-align:right;}
+  .meta-row{display:flex;justify-content:space-between;font-size:12px;color:var(--ink-soft);margin-top:4px;}
+  .badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:700;}
+  .badge.warn{background:var(--progress-bg);color:var(--progress);}
+  .badge.ok{background:var(--done-bg);color:var(--done);}
+  .new-project-card{border:2px dashed var(--line);display:flex;align-items:center;justify-content:center;
+    color:var(--ink-soft);font-weight:600;font-size:13px;cursor:pointer;min-height:120px;}
+  .new-project-card:hover{border-color:var(--accent);color:var(--accent);}
+
+  /* ---------- Status chips / cells ---------- */
+  .status-chip{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:20px;
+    font-size:11px;font-weight:700;white-space:nowrap;}
+  .status-chip.Done{background:var(--done-bg);color:var(--done);}
+  .status-chip.In-Progress{background:var(--progress-bg);color:var(--progress);}
+  .status-chip.Delayed{background:var(--delayed-bg);color:var(--delayed);}
+  .status-chip.Not-Started{background:var(--notstarted-bg);color:var(--notstarted);}
+  .status-chip.N-A{background:var(--na-bg);color:var(--na);}
+  .dot{width:7px;height:7px;border-radius:50%;background:currentColor;}
+
+  .stat-strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:16px;}
+  .stat-box{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:12px 14px;}
+  .stat-box .label{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--ink-soft);font-weight:700;}
+  .stat-box .value{font-size:22px;font-weight:750;margin-top:3px;}
+  .stat-box .value.accent{color:var(--accent-dark);}
+  .stat-box .value.red{color:var(--delayed);}
+
+  .section-title{font-size:13px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-soft);
+    font-weight:700;margin:22px 0 10px;}
+  .section-title:first-child{margin-top:0;}
+
+  /* ---------- Filters ---------- */
+  .filters{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;}
+  .filters select, .filters input[type=text]{padding:7px 10px;border:1px solid var(--line);border-radius:7px;
+    font-size:12.5px;background:#fff;color:var(--ink);}
+
+  /* ---------- Tracker grid ---------- */
+  .space-block{margin-bottom:26px;}
+  .space-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;}
+  .space-head h3{font-size:15px;}
+  .table-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:var(--radius);background:#fff;}
+  table.tracker{border-collapse:collapse;width:100%;font-size:12.5px;}
+  table.tracker th{background:#faf8f4;text-align:left;padding:8px 10px;font-size:11px;text-transform:uppercase;
+    letter-spacing:.03em;color:var(--ink-soft);border-bottom:1px solid var(--line);white-space:nowrap;}
+  table.tracker td{padding:6px 8px;border-bottom:1px solid #f0ede6;vertical-align:middle;white-space:nowrap;}
+  table.tracker tr:last-child td{border-bottom:none;}
+  table.tracker td.subitem-cell{white-space:normal;min-width:170px;}
+  .subitem-cell .cat{display:block;font-size:10.5px;color:var(--ink-soft);font-weight:600;text-transform:uppercase;
+    letter-spacing:.03em;}
+  .stage-cell{width:44px;height:26px;border-radius:6px;cursor:pointer;border:1px solid transparent;
+    display:flex;align-items:center;justify-content:center;position:relative;}
+  .stage-cell.Done{background:var(--done);}
+  .stage-cell.In-Progress{background:var(--progress);}
+  .stage-cell.Delayed{background:var(--delayed);}
+  .stage-cell.Not-Started{background:var(--notstarted-bg);border-color:var(--line);}
+  .stage-cell.N-A{background:var(--na-bg);border:1px dashed var(--na);}
+  .stage-cell.overdue::after{content:"!";position:absolute;top:-5px;right:-5px;background:var(--delayed);
+    color:#fff;width:14px;height:14px;border-radius:50%;font-size:10px;line-height:14px;text-align:center;font-weight:800;}
+  .stage-cell:hover{outline:2px solid var(--ink);outline-offset:1px;}
+
+  /* ---------- Buttons ---------- */
+  .btn{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:7px;border:1px solid var(--line);
+    background:#fff;color:var(--ink);font-size:13px;font-weight:600;}
+  .btn:hover{border-color:var(--accent);color:var(--accent-dark);}
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;}
+  .btn.primary:hover{background:var(--accent-dark);border-color:var(--accent-dark);color:#fff;}
+  .btn.small{padding:5px 10px;font-size:12px;}
+  .btn.ghost{border-color:transparent;background:transparent;}
+
+  /* ---------- Forms / modal ---------- */
+  .field{margin-bottom:12px;}
+  .field label{display:block;font-size:12px;font-weight:700;color:var(--ink-soft);margin-bottom:4px;}
+  .field input, .field select, .field textarea{width:100%;padding:8px 10px;border:1px solid var(--line);
+    border-radius:7px;font-size:13.5px;background:#fff;color:var(--ink);}
+  .field textarea{min-height:70px;resize:vertical;}
+  .field-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  .modal-overlay{position:fixed;inset:0;background:rgba(28,33,40,.5);display:flex;align-items:center;
+    justify-content:center;z-index:100;padding:16px;}
+  .modal{background:#fff;border-radius:12px;padding:20px;width:100%;max-width:440px;max-height:90vh;overflow-y:auto;
+    box-shadow:0 20px 50px rgba(0,0,0,.25);}
+  .modal h3{margin-bottom:14px;}
+  .modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px;}
+  .space-adder{display:flex;gap:6px;margin-bottom:8px;}
+  .space-adder input{flex:1;}
+  .chip-remove{background:var(--notstarted-bg);border-radius:6px;padding:5px 9px;font-size:12px;
+    display:inline-flex;align-items:center;gap:6px;margin:0 5px 5px 0;}
+  .chip-remove button{background:none;border:none;color:var(--ink-soft);font-weight:800;}
+
+  /* ---------- Daily log ---------- */
+  .log-feed{display:flex;flex-direction:column;gap:10px;}
+  .log-entry{background:#fff;border:1px solid var(--line);border-radius:var(--radius);padding:12px 14px;}
+  .log-entry.blocker{border-left:4px solid var(--delayed);}
+  .log-entry .lhead{display:flex;justify-content:space-between;font-size:12px;color:var(--ink-soft);margin-bottom:5px;}
+  .log-entry .lhead b{color:var(--ink);}
+  .log-entry p{margin:0;font-size:13.5px;line-height:1.5;}
+
+  /* ---------- Progress report ---------- */
+  .report-card{background:#fff;border:1px solid var(--line);border-radius:var(--radius);padding:24px;}
+  .report-card h2{font-size:20px;}
+  .report-sub{color:var(--ink-soft);font-size:13px;margin-bottom:18px;}
+  ul.plain{margin:0;padding-left:18px;}
+  ul.plain li{margin-bottom:5px;font-size:13.5px;}
+  .print-only{display:none;}
+  @media print{
+    .topbar,.projectbar,.tabs,.no-print{display:none !important;}
+    .content{padding:0;max-width:none;}
+    body{background:#fff;}
+  }
+
+  /* ---------- Client view ---------- */
+  .client-hero{background:linear-gradient(135deg,var(--ink) 0%, #2b3340 100%);color:#fff;border-radius:14px;
+    padding:26px;margin-bottom:18px;}
+  .client-hero .big{font-size:40px;font-weight:800;letter-spacing:-.02em;}
+  .client-hero .lbl{font-size:12px;opacity:.7;text-transform:uppercase;letter-spacing:.04em;}
+  .client-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;}
+  .space-chip-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;}
+
+  .empty-state{text-align:center;padding:50px 20px;color:var(--ink-soft);}
+  .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;
+    padding:9px 18px;border-radius:8px;font-size:13px;font-weight:600;z-index:200;box-shadow:var(--shadow);
+    opacity:0;pointer-events:none;transition:opacity .2s;}
+  .toast.show{opacity:1;}
+
+  @media (max-width:640px){
+    .content{padding:12px;}
+    .projectbar{top:48px;}
+    .tabs{top:88px;}
+    .field-row{grid-template-columns:1fr;}
+    .client-hero .big{font-size:32px;}
+  }
+</style>
+</head>
+<body>
+<div class="app" id="app">
+  <div class="topbar">
+    <div class="brand"><div class="mark">ID</div><div>IDS PMC Tool<small>Ideaform Design Studio &mdash; Project Management Console</small></div></div>
+    <div class="role-switch" id="roleSwitch"></div>
+  </div>
+  <div id="belowBar"></div>
+  <div class="content" id="content"><div class="empty-state">Loading&hellip;</div></div>
+</div>
+<div id="modalRoot"></div>
+<div class="toast" id="toast"></div>
+
+<script>
+// ============================= STATE =============================
+var STATE = {
+  data: null,
+  role: 'admin',            // 'engineer' | 'admin' | 'client'
+  currentProjectId: null,
+  currentTab: null,
+  loggedByName: localStorage.getItem('pmc_logged_by') || '',
+  filters: { space:'', category:'', stage:'', status:'' }
+};
+
+var STATUS_LIST = ['Not Started','In Progress','Done','Delayed','N/A'];
+function cls(status){ return String(status).replace(/\//g,'-').replace(/\s+/g,'-'); }
+function todayISO(){ var d=new Date(); return d.toISOString().slice(0,10); }
+function fmtDate(iso){
+  if(!iso) return '&mdash;';
+  var d = new Date(iso);
+  if(isNaN(d)) return iso;
+  return d.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'});
+}
+function fmtMoney(n){
+  n = Number(n)||0;
+  return '₹' + n.toLocaleString('en-IN');
+}
+function escapeHtml(s){
+  return String(s==null?'':s).replace(/[&<>"']/g, function(c){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+  });
+}
+
+// ============================= BACKEND API =============================
+var APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzEPFiPoZMiq-BefAbPBvjG-o0VZkMH4UxNVQchUfQJyw3Xag6eAxKA2MVBRVcLsKiA3w/exec';
+
+function apiGet(action){
+  return fetch(APPS_SCRIPT_URL + '?action=' + encodeURIComponent(action))
+    .then(function(r){ return r.json(); })
+    .then(function(res){ if(!res.ok) throw new Error(res.error||'Request failed'); return res.data; });
+}
+function apiPost(action, payload){
+  // text/plain avoids a CORS preflight (Apps Script doesn't answer OPTIONS).
+  return fetch(APPS_SCRIPT_URL, {
+    method:'POST',
+    headers:{'Content-Type':'text/plain;charset=utf-8'},
+    body: JSON.stringify({ action: action, payload: payload||{} })
+  }).then(function(r){ return r.json(); })
+    .then(function(res){ if(!res.ok) throw new Error(res.error||'Request failed'); return res.data; });
+}
+
+// ============================= BOOT =============================
+function boot(){
+  apiGet('getAllData').then(function(data){
+    STATE.data = data;
+    STATE.currentTab = null;
+    render();
+  }).catch(showErr);
+}
+function refresh(cb){
+  apiGet('getAllData').then(function(data){
+    STATE.data = data;
+    render();
+    if(cb) cb();
+  }).catch(showErr);
+}
+function showErr(err){
+  console.error(err);
+  toast('Error: ' + (err && err.message ? err.message : err));
+}
+function toast(msg){
+  var t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(function(){ t.classList.remove('show'); }, 2600);
+}
+
+// ============================= DERIVED HELPERS =============================
+function spacesOf(projectId){
+  return STATE.data.spaces.filter(function(s){return s.ProjectID===projectId;})
+    .sort(function(a,b){return (a.SortOrder||0)-(b.SortOrder||0);});
+}
+function trackerOf(projectId, spaceId){
+  return STATE.data.tracker.filter(function(t){
+    return t.ProjectID===projectId && (!spaceId || t.SpaceID===spaceId);
+  });
+}
+function cashflowOf(projectId, spaceId){
+  return STATE.data.cashflow.filter(function(c){
+    return c.ProjectID===projectId && (!spaceId || c.SpaceID===spaceId);
+  });
+}
+function logsOf(projectId){
+  return STATE.data.dailyLog.filter(function(l){return l.ProjectID===projectId;});
+}
+function projectPct(projectId){
+  var rows = trackerOf(projectId);
+  if(!rows.length) return 0;
+  var total=0, done=0;
+  rows.forEach(function(r){
+    r.Stages.forEach(function(s){ total++; if(s.status==='Done'||s.status==='N/A') done++; });
+  });
+  return total ? Math.round(done/total*100) : 0;
+}
+function spacePct(projectId, spaceId){
+  var rows = trackerOf(projectId, spaceId);
+  var total=0, done=0;
+  rows.forEach(function(r){ r.Stages.forEach(function(s){ total++; if(s.status==='Done'||s.status==='N/A') done++; }); });
+  return total? Math.round(done/total*100) : 0;
+}
+function isOverdue(stage){
+  if(!stage.target) return false;
+  if(stage.status==='Done'||stage.status==='N/A') return false;
+  return stage.target < todayISO();
+}
+function delayedItems(projectId){
+  var out = [];
+  trackerOf(projectId).forEach(function(r){
+    var sp = STATE.data.spaces.filter(function(s){return s.SpaceID===r.SpaceID;})[0];
+    r.Stages.forEach(function(s){
+      if(s.status==='Delayed' || isOverdue(s)){
+        out.push({space: sp?sp.Name:'', category:r.Category, subItem:r.SubItem, stage:s.stage,
+          status:s.status, target:s.target, overdue:isOverdue(s)});
+      }
+    });
+  });
+  return out;
+}
+function projectCashSummary(projectId){
+  var rows = cashflowOf(projectId);
+  var boq=0, inv=0, rec=0;
+  rows.forEach(function(r){ boq+=Number(r.BOQValue)||0; inv+=Number(r.Invoiced)||0; rec+=Number(r.Received)||0; });
+  return { boq:boq, invoiced:inv, received:rec, outstanding: inv-rec };
+}
+function nextPaymentDue(projectId){
+  var rows = cashflowOf(projectId).filter(function(r){
+    return r.DueDate && (Number(r.Invoiced)-Number(r.Received) > 0);
+  });
+  rows.sort(function(a,b){ return new Date(a.DueDate)-new Date(b.DueDate); });
+  return rows[0] || null;
+}
+function daysToMoveIn(project){
+  if(!project.TargetMoveIn) return null;
+  var target = new Date(project.TargetMoveIn);
+  var today = new Date(todayISO());
+  return Math.ceil((target-today)/86400000);
+}
+
+// ============================= RENDER: SHELL =============================
+function render(){
+  renderRoleSwitch();
+  if(!STATE.currentProjectId){
+    document.getElementById('belowBar').innerHTML = '';
+    renderProjectList();
+  } else {
+    renderBelowBar();
+    renderProjectContent();
+  }
+}
+function renderRoleSwitch(){
+  var roles = [['engineer','Site Engineer'],['admin','Admin / PM'],['client','Client']];
+  document.getElementById('roleSwitch').innerHTML = roles.map(function(r){
+    return '<button class="'+(STATE.role===r[0]?'active':'')+'" onclick="setRole(\''+r[0]+'\')">'+r[1]+'</button>';
+  }).join('');
+}
+function setRole(r){
+  STATE.role = r;
+  STATE.currentTab = null;
+  render();
+}
+function goHome(){
+  STATE.currentProjectId = null;
+  STATE.currentTab = null;
+  render();
+}
+function openProject(id){
+  STATE.currentProjectId = id;
+  STATE.currentTab = defaultTabForRole();
+  render();
+}
+function defaultTabForRole(){
+  if(STATE.role==='engineer') return 'tracker';
+  if(STATE.role==='client') return 'client';
+  return 'review';
+}
+function renderBelowBar(){
+  var p = STATE.data.projects.filter(function(x){return x.ProjectID===STATE.currentProjectId;})[0];
+  if(!p){ STATE.currentProjectId=null; return; }
+  var html = '<div class="projectbar">'+
+    '<button class="back-btn" onclick="goHome()">&larr; All Projects</button>'+
+    '<div><div class="pname">'+escapeHtml(p.Name)+'</div><div class="paddr">'+escapeHtml(p.Address||'')+'</div></div>'+
+    '</div>';
+  html += '<div class="tabs">' + tabsForRole().map(function(t){
+    return '<button class="'+(STATE.currentTab===t[0]?'active':'')+'" onclick="setTab(\''+t[0]+'\')">'+t[1]+'</button>';
+  }).join('') + '</div>';
+  document.getElementById('belowBar').innerHTML = html;
+}
+function tabsForRole(){
+  if(STATE.role==='engineer') return [['tracker','Tracker'],['daily','Daily Log']];
+  if(STATE.role==='client') return [['client','Overview']];
+  return [['review','Progress Review'],['planning','Planning'],['cashflow','Cash Flow'],
+    ['daily','Daily Tracking'],['report','Progress Report'],['manage','Manage']];
+}
+function setTab(t){ STATE.currentTab = t; render(); }
+
+// ============================= RENDER: PROJECT LIST =============================
+function renderProjectList(){
+  var html = '<div class="section-title">Projects</div><div class="grid-cards">';
+  STATE.data.projects.forEach(function(p){
+    var pct = projectPct(p.ProjectID);
+    var dtm = daysToMoveIn(p);
+    var due = nextPaymentDue(p.ProjectID);
+    html += '<div class="card proj-card" onclick="openProject(\''+p.ProjectID+'\')">'+
+      '<h3>'+escapeHtml(p.Name)+'</h3>'+
+      '<div style="font-size:12px;color:var(--ink-soft)">'+escapeHtml(p.Address||'')+'</div>'+
+      '<div class="pct-row"><div class="pct-bar"><div style="width:'+pct+'%"></div></div><div class="pct-num">'+pct+'%</div></div>'+
+      '<div class="meta-row"><span>'+(dtm!==null ? (dtm>=0 ? dtm+' days to move-in' : Math.abs(dtm)+' days past target') : 'No move-in date') +'</span>'+
+      (due ? '<span class="badge warn">'+fmtMoney(Number(due.Invoiced)-Number(due.Received))+' due '+fmtDate(due.DueDate)+'</span>' : '<span class="badge ok">No dues pending</span>')+
+      '</div></div>';
+  });
+  if(STATE.role==='admin'){
+    html += '<div class="card new-project-card" onclick="openNewProjectModal()">+ New Project</div>';
+  }
+  html += '</div>';
+  if(!STATE.data.projects.length){
+    html = '<div class="empty-state">No projects yet.'+(STATE.role==='admin'?' Click below to add one.':'')+'</div>' + html;
+  }
+  document.getElementById('content').innerHTML = html;
+}
+
+// ============================= RENDER: PROJECT CONTENT ROUTER =============================
+function renderProjectContent(){
+  var el = document.getElementById('content');
+  if(STATE.role==='client'){ el.innerHTML = renderClientView(); return; }
+  switch(STATE.currentTab){
+    case 'tracker': el.innerHTML = renderTrackerView(true); break;
+    case 'review': el.innerHTML = renderReviewView(); break;
+    case 'planning': el.innerHTML = renderTrackerView(false); break;
+    case 'cashflow': el.innerHTML = renderCashflowView(); break;
+    case 'daily': el.innerHTML = renderDailyView(); attachDailyHandlers(); break;
+    case 'report': el.innerHTML = renderReportView(); break;
+    case 'manage': el.innerHTML = renderManageView(); break;
+    default: el.innerHTML = renderReviewView();
+  }
+}
+
+// ============================= PROGRESS REVIEW (Admin) =============================
+function renderReviewView(){
+  var pid = STATE.currentProjectId;
+  var pct = projectPct(pid);
+  var cash = projectCashSummary(pid);
+  var delayed = delayedItems(pid);
+  var spaces = spacesOf(pid);
+
+  var html = '<div class="stat-strip">'+
+    statBox('Overall Complete', pct+'%','accent')+
+    statBox('Spaces', spaces.length)+
+    statBox('Outstanding', fmtMoney(cash.outstanding),'accent')+
+    statBox('Delayed / Overdue Items', delayed.length, delayed.length? 'red':'')+
+    '</div>';
+
+  html += '<div class="section-title">By Space</div><div class="grid-cards">';
+  spaces.forEach(function(s){
+    var p = spacePct(pid, s.SpaceID);
+    html += '<div class="card"><h3>'+escapeHtml(s.Name)+'</h3>'+
+      '<div class="pct-row"><div class="pct-bar"><div style="width:'+p+'%"></div></div><div class="pct-num">'+p+'%</div></div>'+
+      categoryChipRow(pid, s.SpaceID) +
+      '</div>';
+  });
+  html += '</div>';
+
+  if(delayed.length){
+    html += '<div class="section-title">Delayed / Overdue</div><div class="table-wrap"><table class="tracker"><thead><tr>'+
+      '<th>Space</th><th>Category</th><th>Sub-item</th><th>Stage</th><th>Status</th><th>Target</th></tr></thead><tbody>';
+    delayed.forEach(function(d){
+      html += '<tr><td>'+escapeHtml(d.space)+'</td><td>'+escapeHtml(d.category)+'</td><td>'+escapeHtml(d.subItem)+'</td>'+
+        '<td>'+escapeHtml(d.stage)+'</td><td><span class="status-chip '+cls(d.status)+'">'+
+        (d.overdue && d.status!=='Delayed' ? 'Overdue' : d.status)+'</span></td><td>'+fmtDate(d.target)+'</td></tr>';
+    });
+    html += '</tbody></table></div>';
+  }
+  return html;
+}
+function statBox(label, value, tone){
+  return '<div class="stat-box"><div class="label">'+label+'</div><div class="value '+(tone||'')+'">'+value+'</div></div>';
+}
+function categoryChipRow(pid, spaceId){
+  var rows = trackerOf(pid, spaceId);
+  var byCat = {};
+  rows.forEach(function(r){
+    if(!byCat[r.Category]) byCat[r.Category] = [];
+    byCat[r.Category].push(r.RollupStatus);
+  });
+  var html = '<div class="space-chip-row">';
+  Object.keys(byCat).forEach(function(cat){
+    var statuses = byCat[cat];
+    var worst = 'Done';
+    if(statuses.indexOf('Delayed')>-1) worst='Delayed';
+    else if(statuses.indexOf('In Progress')>-1) worst='In Progress';
+    else if(statuses.every(function(s){return s==='Done';})) worst='Done';
+    else worst='Not Started';
+    html += '<span class="status-chip '+cls(worst)+'"><span class="dot"></span>'+escapeHtml(cat)+'</span>';
+  });
+  return html + '</div>';
+}
+
+// ============================= TRACKER / PLANNING GRID =============================
+function renderTrackerView(editable){
+  var pid = STATE.currentProjectId;
+  var spaces = spacesOf(pid);
+  var schema = STATE.data.schema;
+  var html = '';
+  if(!editable){
+    html += filterBar();
+  }
+  spaces.forEach(function(sp){
+    var rows = trackerOf(pid, sp.SpaceID).filter(function(r){
+      if(STATE.filters.category && r.Category!==STATE.filters.category) return false;
+      return true;
+    });
+    if(STATE.filters.space && STATE.filters.space!==sp.SpaceID) return;
+    html += '<div class="space-block"><div class="space-head"><h3>'+escapeHtml(sp.Name)+'</h3>'+
+      '<span class="badge ok">'+spacePct(pid, sp.SpaceID)+'% complete</span></div>';
+    html += '<div class="table-wrap"><table class="tracker"><thead><tr><th>Sub-item</th>';
+    schema.stages.forEach(function(st){ html += '<th style="text-align:center">'+st+'</th>'; });
+    html += '</tr></thead><tbody>';
+    rows.forEach(function(r){
+      html += '<tr><td class="subitem-cell"><span class="cat">'+escapeHtml(r.Category)+'</span>'+escapeHtml(r.SubItem)+'</td>';
+      r.Stages.forEach(function(s){
+        var overdueFlag = isOverdue(s) ? ' overdue' : '';
+        var title = s.stage+': '+s.status+(s.target? ' · target '+fmtDate(s.target):'')+(s.note? ' · '+s.note:'');
+        html += '<td style="text-align:center"><div class="stage-cell '+cls(s.status)+overdueFlag+'" title="'+escapeHtml(title)+'" '+
+          (editable? 'onclick="openStageModal(\''+r.TrackerID+'\',\''+s.stage+'\')"' : 'onclick="openStageModal(\''+r.TrackerID+'\',\''+s.stage+'\',true)"')+
+          '></div></td>';
+      });
+      html += '</tr>';
+    });
+    html += '</tbody></table></div></div>';
+  });
+  if(!spaces.length) html += '<div class="empty-state">No spaces yet.</div>';
+  return html;
+}
+function filterBar(){
+  var pid = STATE.currentProjectId;
+  var spaces = spacesOf(pid);
+  var cats = STATE.data.schema.categories;
+  var html = '<div class="filters">'+
+    '<select onchange="STATE.filters.space=this.value;render()"><option value="">All spaces</option>'+
+    spaces.map(function(s){return '<option value="'+s.SpaceID+'" '+(STATE.filters.space===s.SpaceID?'selected':'')+'>'+escapeHtml(s.Name)+'</option>';}).join('')+
+    '</select>'+
+    '<select onchange="STATE.filters.category=this.value;render()"><option value="">All categories</option>'+
+    cats.map(function(c){return '<option value="'+c+'" '+(STATE.filters.category===c?'selected':'')+'>'+c+'</option>';}).join('')+
+    '</select></div>';
+  return html;
+}
+
+function openStageModal(trackerId, stageName, readOnly){
+  var row = STATE.data.tracker.filter(function(t){return t.TrackerID===trackerId;})[0];
+  var stage = row.Stages.filter(function(s){return s.stage===stageName;})[0];
+  var space = STATE.data.spaces.filter(function(s){return s.SpaceID===row.SpaceID;})[0];
+  var body =
+    '<h3>'+escapeHtml(row.SubItem)+' &mdash; '+escapeHtml(stageName)+'</h3>'+
+    '<div style="font-size:12px;color:var(--ink-soft);margin-bottom:14px;">'+escapeHtml(space?space.Name:'')+' &middot; '+escapeHtml(row.Category)+'</div>'+
+    '<div class="field"><label>Status</label><select id="m-status" '+(readOnly?'disabled':'')+'>'+
+      STATUS_LIST.map(function(s){return '<option value="'+s+'" '+(stage.status===s?'selected':'')+'>'+s+'</option>';}).join('')+
+    '</select></div>'+
+    '<div class="field-row">'+
+      '<div class="field"><label>Target date</label><input type="date" id="m-target" value="'+(stage.target||'')+'" '+(readOnly?'disabled':'')+'></div>'+
+      '<div class="field"><label>Actual completion</label><input type="date" id="m-actual" value="'+(stage.actual||'')+'" '+(readOnly?'disabled':'')+'></div>'+
+    '</div>'+
+    '<div class="field"><label>Note</label><textarea id="m-note" '+(readOnly?'disabled':'')+'>'+escapeHtml(stage.note||'')+'</textarea></div>'+
+    '<div class="modal-actions">'+
+      '<button class="btn" onclick="closeModal()">'+(readOnly?'Close':'Cancel')+'</button>'+
+      (readOnly? '' : '<button class="btn primary" onclick="saveStage(\''+trackerId+'\',\''+stageName+'\')">Save</button>')+
+    '</div>';
+  showModal(body);
+}
+function saveStage(trackerId, stageName){
+  var payload = {
+    trackerId: trackerId, stage: stageName,
+    status: document.getElementById('m-status').value,
+    target: document.getElementById('m-target').value,
+    actual: document.getElementById('m-actual').value,
+    note: document.getElementById('m-note').value
+  };
+  apiPost('updateStage', payload).then(function(){
+    closeModal(); toast('Saved'); refresh();
+  }).catch(showErr);
+}
+
+// ============================= CASH FLOW =============================
+function renderCashflowView(){
+  var pid = STATE.currentProjectId;
+  var cash = projectCashSummary(pid);
+  var spaces = spacesOf(pid);
+  var html = '<div class="stat-strip">'+
+    statBox('Total BOQ Value', fmtMoney(cash.boq))+
+    statBox('Invoiced', fmtMoney(cash.invoiced))+
+    statBox('Received', fmtMoney(cash.received),'accent')+
+    statBox('Outstanding', fmtMoney(cash.outstanding), cash.outstanding>0?'red':'')+
+    '</div>';
+
+  spaces.forEach(function(sp){
+    var rows = cashflowOf(pid, sp.SpaceID);
+    html += '<div class="section-title">'+escapeHtml(sp.Name)+'</div>';
+    html += '<div class="table-wrap"><table class="tracker"><thead><tr>'+
+      '<th>Category</th><th>BOQ Value</th><th>Split (Order/Delivery/Install)</th><th>Invoiced</th><th>Received</th>'+
+      '<th>Due Date</th><th>Status</th><th></th></tr></thead><tbody>';
+    rows.forEach(function(r){
+      var s = r.Split||{};
+      html += '<tr>'+
+        '<td>'+escapeHtml(r.Category)+'</td>'+
+        '<td>'+fmtMoney(r.BOQValue)+'</td>'+
+        '<td>'+ (s['Order Placement']||0)+'% / '+(s['Delivery']||0)+'% / '+(s['Installation']||0)+'%</td>'+
+        '<td>'+fmtMoney(r.Invoiced)+'</td>'+
+        '<td>'+fmtMoney(r.Received)+'</td>'+
+        '<td>'+fmtDate(r.DueDate)+'</td>'+
+        '<td><span class="status-chip '+cls(r.PaymentStatus||'Pending')+'">'+(r.PaymentStatus||'Pending')+'</span></td>'+
+        '<td><button class="btn small" onclick="openCashflowModal(\''+r.CashflowID+'\')">Edit</button></td>'+
+        '</tr>';
+    });
+    html += '</tbody></table></div>';
+  });
+  return html;
+}
+function openCashflowModal(cashflowId){
+  var r = STATE.data.cashflow.filter(function(c){return c.CashflowID===cashflowId;})[0];
+  var s = r.Split||{};
+  var body = '<h3>'+escapeHtml(r.Category)+' &mdash; Cash Flow</h3>'+
+    '<div class="field"><label>BOQ Value</label><input type="number" id="cf-boq" value="'+(r.BOQValue||0)+'"></div>'+
+    '<div class="field-row">'+
+      '<div class="field"><label>% at Order Placement</label><input type="number" id="cf-s1" value="'+(s['Order Placement']||0)+'"></div>'+
+      '<div class="field"><label>% at Delivery</label><input type="number" id="cf-s2" value="'+(s['Delivery']||0)+'"></div>'+
+    '</div>'+
+    '<div class="field"><label>% at Installation</label><input type="number" id="cf-s3" value="'+(s['Installation']||0)+'"></div>'+
+    '<div class="field-row">'+
+      '<div class="field"><label>Amount Invoiced</label><input type="number" id="cf-inv" value="'+(r.Invoiced||0)+'"></div>'+
+      '<div class="field"><label>Amount Received</label><input type="number" id="cf-rec" value="'+(r.Received||0)+'"></div>'+
+    '</div>'+
+    '<div class="field-row">'+
+      '<div class="field"><label>Due Date</label><input type="date" id="cf-due" value="'+(r.DueDate||'')+'"></div>'+
+      '<div class="field"><label>Payment Status</label><select id="cf-status">'+
+        ['Pending','Partial','Paid'].map(function(o){return '<option '+(r.PaymentStatus===o?'selected':'')+'>'+o+'</option>';}).join('')+
+      '</select></div>'+
+    '</div>'+
+    '<div class="modal-actions"><button class="btn" onclick="closeModal()">Cancel</button>'+
+    '<button class="btn primary" onclick="saveCashflow(\''+cashflowId+'\')">Save</button></div>';
+  showModal(body);
+}
+function saveCashflow(cashflowId){
+  var payload = {
+    cashflowId: cashflowId,
+    boqValue: document.getElementById('cf-boq').value,
+    split: {
+      'Order Placement': Number(document.getElementById('cf-s1').value)||0,
+      'Delivery': Number(document.getElementById('cf-s2').value)||0,
+      'Installation': Number(document.getElementById('cf-s3').value)||0
+    },
+    invoiced: document.getElementById('cf-inv').value,
+    received: document.getElementById('cf-rec').value,
+    dueDate: document.getElementById('cf-due').value,
+    status: document.getElementById('cf-status').value
+  };
+  apiPost('updateCashflow', payload).then(function(){
+    closeModal(); toast('Saved'); refresh();
+  }).catch(showErr);
+}
+
+// ============================= DAILY TRACKING =============================
+function renderDailyView(){
+  var pid = STATE.currentProjectId;
+  var spaces = spacesOf(pid);
+  var logs = logsOf(pid);
+  var formHtml = '<div class="card no-print" style="margin-bottom:18px;max-width:560px;">'+
+    '<h3>Log Today\'s Update</h3>'+
+    '<div class="field-row">'+
+      '<div class="field"><label>Date</label><input type="date" id="dl-date" value="'+todayISO()+'"></div>'+
+      '<div class="field"><label>Space</label><select id="dl-space"><option value="">General</option>'+
+        spaces.map(function(s){return '<option value="'+s.SpaceID+'">'+escapeHtml(s.Name)+'</option>';}).join('')+
+      '</select></div>'+
+    '</div>'+
+    '<div class="field"><label>What got done today / blockers</label><textarea id="dl-entry" placeholder="e.g. Flooring grouting completed in living area, kitchen tile delivery delayed..."></textarea></div>'+
+    '<div class="field-row">'+
+      '<div class="field"><label>Logged by</label><input type="text" id="dl-by" value="'+escapeHtml(STATE.loggedByName)+'" placeholder="Your name"></div>'+
+      '<div class="field" style="display:flex;align-items:flex-end;"><label style="display:flex;align-items:center;gap:7px;margin:0;">'+
+        '<input type="checkbox" id="dl-blocker" style="width:auto;"> Flag as blocker / issue</label></div>'+
+    '</div>'+
+    '<button class="btn primary" onclick="submitDailyLog()">Save Entry</button>'+
+    '</div>';
+
+  var feedHtml = '<div class="section-title">History</div><div class="log-feed">';
+  if(!logs.length) feedHtml += '<div class="empty-state">No entries yet.</div>';
+  logs.forEach(function(l){
+    var sp = STATE.data.spaces.filter(function(s){return s.SpaceID===l.SpaceID;})[0];
+    feedHtml += '<div class="log-entry '+(l.HasBlocker?'blocker':'')+'">'+
+      '<div class="lhead"><span><b>'+escapeHtml(sp?sp.Name:'General')+'</b> &middot; '+fmtDate(l.Date)+'</span>'+
+      '<span>'+escapeHtml(l.LoggedBy||'')+(l.HasBlocker?' &middot; <span style="color:var(--delayed);font-weight:700;">BLOCKER</span>':'')+'</span></div>'+
+      '<p>'+escapeHtml(l.Entry)+'</p></div>';
+  });
+  feedHtml += '</div>';
+  return formHtml + feedHtml;
+}
+function attachDailyHandlers(){}
+function submitDailyLog(){
+  var entry = document.getElementById('dl-entry').value.trim();
+  var by = document.getElementById('dl-by').value.trim();
+  if(!entry){ toast('Please add what got done today'); return; }
+  if(!by){ toast('Please add your name'); return; }
+  localStorage.setItem('pmc_logged_by', by);
+  STATE.loggedByName = by;
+  var payload = {
+    date: document.getElementById('dl-date').value || todayISO(),
+    projectId: STATE.currentProjectId,
+    spaceId: document.getElementById('dl-space').value,
+    entry: entry,
+    loggedBy: by,
+    hasBlocker: document.getElementById('dl-blocker').checked
+  };
+  apiPost('addDailyLog', payload).then(function(){
+    toast('Logged'); refresh();
+  }).catch(showErr);
+}
+
+// ============================= PROGRESS REPORT =============================
+function renderReportView(){
+  var pid = STATE.currentProjectId;
+  var p = STATE.data.projects.filter(function(x){return x.ProjectID===pid;})[0];
+  var pct = projectPct(pid);
+  var cash = projectCashSummary(pid);
+  var delayed = delayedItems(pid);
+  var weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate()-7);
+  var completions = [];
+  trackerOf(pid).forEach(function(r){
+    r.Stages.forEach(function(s){
+      if(s.status==='Done' && s.actual && new Date(s.actual) >= weekAgo){
+        var sp = STATE.data.spaces.filter(function(x){return x.SpaceID===r.SpaceID;})[0];
+        completions.push((sp?sp.Name+' &mdash; ':'')+r.SubItem+' ('+s.stage+') &mdash; '+fmtDate(s.actual));
+      }
+    });
+  });
+  var dues = cashflowOf(pid).filter(function(r){ return Number(r.Invoiced)-Number(r.Received) > 0; });
+
+  var html = '<div class="no-print" style="margin-bottom:14px;"><button class="btn primary" onclick="window.print()">Print / Export</button></div>';
+  html += '<div class="report-card">'+
+    '<h2>'+escapeHtml(p.Name)+' &mdash; Progress Report</h2>'+
+    '<div class="report-sub">'+escapeHtml(p.Address||'')+' &middot; Generated '+fmtDate(todayISO())+'</div>';
+
+  html += '<div class="stat-strip"><div class="stat-box"><div class="label">Overall Complete</div><div class="value accent">'+pct+'%</div></div>'+
+    '<div class="stat-box"><div class="label">Outstanding Payments</div><div class="value">'+fmtMoney(cash.outstanding)+'</div></div>'+
+    '<div class="stat-box"><div class="label">Delayed Items</div><div class="value '+(delayed.length?'red':'')+'">'+delayed.length+'</div></div></div>';
+
+  html += '<div class="section-title">This Week\'s Completions</div>';
+  html += completions.length ? '<ul class="plain">'+completions.map(function(c){return '<li>'+c+'</li>';}).join('')+'</ul>' : '<p style="color:var(--ink-soft);font-size:13px;">No stage completions logged in the last 7 days.</p>';
+
+  html += '<div class="section-title">Delayed Items</div>';
+  html += delayed.length ? '<ul class="plain">'+delayed.map(function(d){
+      var sp = d.space;
+      return '<li>'+escapeHtml(sp)+' &mdash; '+escapeHtml(d.subItem)+' ('+escapeHtml(d.stage)+') &mdash; '+ (d.overdue&&d.status!=='Delayed'?'overdue, target was '+fmtDate(d.target):'marked delayed')+'</li>';
+    }).join('')+'</ul>' : '<p style="color:var(--ink-soft);font-size:13px;">None &mdash; on track.</p>';
+
+  html += '<div class="section-title">Upcoming Payments</div>';
+  html += dues.length ? '<ul class="plain">'+dues.map(function(d){
+      return '<li>'+escapeHtml(d.Category)+' &mdash; '+fmtMoney(Number(d.Invoiced)-Number(d.Received))+' due '+fmtDate(d.DueDate)+'</li>';
+    }).join('')+'</ul>' : '<p style="color:var(--ink-soft);font-size:13px;">No payments currently due.</p>';
+
+  html += '</div>';
+  return html;
+}
+
+// ============================= MANAGE (Admin) =============================
+function renderManageView(){
+  var pid = STATE.currentProjectId;
+  var p = STATE.data.projects.filter(function(x){return x.ProjectID===pid;})[0];
+  var spaces = spacesOf(pid);
+  var html = '<div class="card" style="max-width:560px;margin-bottom:18px;"><h3>Project Details</h3>'+
+    '<div class="field"><label>Name</label><input id="mg-name" value="'+escapeHtml(p.Name)+'"></div>'+
+    '<div class="field"><label>Address</label><input id="mg-addr" value="'+escapeHtml(p.Address||'')+'"></div>'+
+    '<div class="field-row">'+
+      '<div class="field"><label>Start Date</label><input type="date" id="mg-start" value="'+(p.StartDate||'')+'"></div>'+
+      '<div class="field"><label>Target Move-in</label><input type="date" id="mg-move" value="'+(p.TargetMoveIn||'')+'"></div>'+
+    '</div>'+
+    '<div class="field-row">'+
+      '<div class="field"><label>Overall Budget</label><input type="number" id="mg-budget" value="'+(p.Budget||0)+'"></div>'+
+      '<div class="field"><label>Client Name</label><input id="mg-client" value="'+escapeHtml(p.ClientName||'')+'"></div>'+
+    '</div>'+
+    '<button class="btn primary" onclick="saveProjectMeta()">Save Changes</button>'+
+    '</div>';
+
+  html += '<div class="card" style="max-width:560px;"><h3>Spaces</h3>';
+  spaces.forEach(function(s){
+    html += '<div class="chip-remove">'+escapeHtml(s.Name)+'</div>';
+  });
+  html += '<div class="space-adder" style="margin-top:10px;">'+
+    '<input type="text" id="mg-newspace" placeholder="New space name (e.g. Kitchen)">'+
+    '<button class="btn" onclick="addSpaceToProject()">Add Space</button></div>'+
+    '<div style="font-size:11.5px;color:var(--ink-soft);">Adding a space auto-generates the full 18-item &times; 6-stage tracker and cash flow rows for it.</div>'+
+    '</div>';
+  return html;
+}
+function saveProjectMeta(){
+  var payload = {
+    projectId: STATE.currentProjectId,
+    name: document.getElementById('mg-name').value,
+    address: document.getElementById('mg-addr').value,
+    startDate: document.getElementById('mg-start').value,
+    targetMoveIn: document.getElementById('mg-move').value,
+    budget: document.getElementById('mg-budget').value,
+    clientName: document.getElementById('mg-client').value
+  };
+  apiPost('updateProject', payload).then(function(){
+    toast('Project updated'); refresh();
+  }).catch(showErr);
+}
+function addSpaceToProject(){
+  var name = document.getElementById('mg-newspace').value.trim();
+  if(!name){ toast('Enter a space name'); return; }
+  apiPost('addSpace', { projectId: STATE.currentProjectId, name: name }).then(function(){
+    toast('Space added'); refresh();
+  }).catch(showErr);
+}
+
+// ============================= CLIENT VIEW =============================
+function renderClientView(){
+  var pid = STATE.currentProjectId;
+  var p = STATE.data.projects.filter(function(x){return x.ProjectID===pid;})[0];
+  var pct = projectPct(pid);
+  var dtm = daysToMoveIn(p);
+  var cash = projectCashSummary(pid);
+  var due = nextPaymentDue(pid);
+  var spaces = spacesOf(pid);
+
+  var html = '<div class="client-hero"><div class="lbl">Days to Move-in</div>'+
+    '<div class="big">'+(dtm!==null ? (dtm>=0? dtm : 0) : '&mdash;')+'</div>'+
+    (dtm!==null && dtm<0 ? '<div style="opacity:.8;font-size:13px;">Target date passed &mdash; '+Math.abs(dtm)+' days ago</div>' : '<div style="opacity:.8;font-size:13px;">Target move-in: '+fmtDate(p.TargetMoveIn)+'</div>')+
+    '</div>';
+
+  html += '<div class="client-grid">'+
+    statBox('Overall Progress', pct+'%','accent')+
+    statBox('Total Amount Due', fmtMoney(cash.outstanding), cash.outstanding>0?'red':'')+
+    statBox('Next Payment', due ? fmtMoney(Number(due.Invoiced)-Number(due.Received))+' by '+fmtDate(due.DueDate) : 'None currently')+
+    '</div>';
+
+  html += '<div class="section-title">Progress by Space</div><div class="grid-cards">';
+  spaces.forEach(function(s){
+    var p2 = spacePct(pid, s.SpaceID);
+    html += '<div class="card"><h3>'+escapeHtml(s.Name)+'</h3>'+
+      '<div class="pct-row"><div class="pct-bar"><div style="width:'+p2+'%"></div></div><div class="pct-num">'+p2+'%</div></div>'+
+      categoryChipRow(pid, s.SpaceID)+
+      '</div>';
+  });
+  html += '</div>';
+  return html;
+}
+
+// ============================= NEW PROJECT MODAL =============================
+var newProjectSpaces = ['Drawing Room'];
+function openNewProjectModal(){
+  newProjectSpaces = ['Drawing Room'];
+  renderNewProjectModal();
+}
+function renderNewProjectModal(){
+  var body = '<h3>New Project</h3>'+
+    '<div class="field"><label>Project Name</label><input id="np-name" placeholder="e.g. Verma Residence"></div>'+
+    '<div class="field"><label>Address</label><input id="np-addr" placeholder="e.g. Shahpura, Bhopal"></div>'+
+    '<div class="field-row">'+
+      '<div class="field"><label>Start Date</label><input type="date" id="np-start" value="'+todayISO()+'"></div>'+
+      '<div class="field"><label>Target Move-in</label><input type="date" id="np-move"></div>'+
+    '</div>'+
+    '<div class="field-row">'+
+      '<div class="field"><label>Overall Budget</label><input type="number" id="np-budget" placeholder="0"></div>'+
+      '<div class="field"><label>Client Name</label><input id="np-client" placeholder="e.g. Rohit Verma"></div>'+
+    '</div>'+
+    '<div class="field"><label>Spaces</label><div id="np-space-chips">'+renderSpaceChips()+'</div>'+
+      '<div class="space-adder"><input type="text" id="np-newspace" placeholder="Add a space, e.g. Kitchen" onkeydown="if(event.key===\'Enter\'){event.preventDefault();addNPSpace();}">'+
+      '<button class="btn small" onclick="addNPSpace()">Add</button></div></div>'+
+    '<div class="modal-actions"><button class="btn" onclick="closeModal()">Cancel</button>'+
+    '<button class="btn primary" onclick="createProject()">Create Project</button></div>';
+  showModal(body);
+}
+function renderSpaceChips(){
+  return newProjectSpaces.map(function(name, i){
+    return '<span class="chip-remove">'+escapeHtml(name)+' <button onclick="removeNPSpace('+i+')">&times;</button></span>';
+  }).join('');
+}
+function addNPSpace(){
+  var input = document.getElementById('np-newspace');
+  var v = input.value.trim();
+  if(!v) return;
+  newProjectSpaces.push(v);
+  input.value='';
+  document.getElementById('np-space-chips').innerHTML = renderSpaceChips();
+}
+function removeNPSpace(i){
+  newProjectSpaces.splice(i,1);
+  document.getElementById('np-space-chips').innerHTML = renderSpaceChips();
+}
+function createProject(){
+  var name = document.getElementById('np-name').value.trim();
+  if(!name){ toast('Project name is required'); return; }
+  var payload = {
+    name: name,
+    address: document.getElementById('np-addr').value,
+    startDate: document.getElementById('np-start').value,
+    targetMoveIn: document.getElementById('np-move').value,
+    budget: document.getElementById('np-budget').value,
+    clientName: document.getElementById('np-client').value,
+    spaces: newProjectSpaces.length ? newProjectSpaces : ['Drawing Room']
+  };
+  apiPost('addProject', payload).then(function(res){
+    closeModal(); toast('Project created');
+    return apiGet('getAllData').then(function(data){
+      STATE.data = data; STATE.currentProjectId = res.projectId; STATE.currentTab = defaultTabForRole(); render();
+    });
+  }).catch(showErr);
+}
+
+// ============================= MODAL PLUMBING =============================
+function showModal(bodyHtml){
+  document.getElementById('modalRoot').innerHTML =
+    '<div class="modal-overlay" onclick="if(event.target===this)closeModal()"><div class="modal">'+bodyHtml+'</div></div>';
+}
+function closeModal(){ document.getElementById('modalRoot').innerHTML = ''; }
+
+boot();
+</script>
+</body>
+</html>

@@ -1,0 +1,7 @@
+**/*.html
+**/*.md
+**/*.json
+!appsscript.json
+**/*.js
+!Code.js
+.git/**
