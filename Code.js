@@ -38,6 +38,63 @@ var DEFAULT_SPLIT = { 'Order Placement': 40, 'Delivery': 40, 'Installation': 20 
 
 var SHEET_PROP_KEY = 'PMC_SHEET_ID';
 
+// ---------- Notifications ----------
+// Email works out of the box (MailApp, no external account needed). WhatsApp is
+// off until WHATSAPP_TOKEN + WHATSAPP_PHONE_ID + WHATSAPP_TO are set as Script
+// Properties (Project Settings > Script Properties in the Apps Script editor) —
+// sendWhatsApp_ silently no-ops until then, so nothing breaks in the meantime.
+var NOTIFY_EMAIL = 'sidinani14@gmail.com';
+var APP_URL = 'https://pmc.ideaformdesignstudio.com';
+
+function sendEmail_(subject, body) {
+  try {
+    MailApp.sendEmail(NOTIFY_EMAIL, subject, body);
+  } catch (e) {
+    Logger.log('sendEmail_ failed: ' + e);
+  }
+}
+
+function sendWhatsApp_(text) {
+  var props = PropertiesService.getScriptProperties();
+  var token = props.getProperty('WHATSAPP_TOKEN');
+  var phoneId = props.getProperty('WHATSAPP_PHONE_ID');
+  var to = props.getProperty('WHATSAPP_TO');
+  if (!token || !phoneId || !to) return; // not configured yet
+  try {
+    UrlFetchApp.fetch('https://graph.facebook.com/v20.0/' + phoneId + '/messages', {
+      method: 'post',
+      contentType: 'application/json',
+      headers: { Authorization: 'Bearer ' + token },
+      muteHttpExceptions: true,
+      payload: JSON.stringify({
+        messaging_product: 'whatsapp',
+        to: to,
+        type: 'text',
+        text: { body: text }
+      })
+    });
+  } catch (e) {
+    Logger.log('sendWhatsApp_ failed: ' + e);
+  }
+}
+
+function notify_(subject, body) {
+  sendEmail_(subject, body);
+  sendWhatsApp_(subject + '\n' + body);
+}
+
+function projectName_(projectId) {
+  var rows = rowsToObjects_(getTab_(getSS_(), 'PROJECTS'));
+  var p = rows.filter(function (r) { return r.ProjectID === projectId; })[0];
+  return p ? p.Name : projectId;
+}
+function spaceName_(spaceId) {
+  if (!spaceId) return 'General';
+  var rows = rowsToObjects_(getTab_(getSS_(), 'SPACES'));
+  var s = rows.filter(function (r) { return r.SpaceID === spaceId; })[0];
+  return s ? s.Name : spaceId;
+}
+
 var TABS = {
   PROJECTS: { name: 'PROJECTS', headers: ['ProjectID', 'Name', 'Address', 'StartDate', 'TargetMoveIn', 'Budget', 'ClientName', 'CreatedAt'] },
   SPACES: { name: 'SPACES', headers: ['SpaceID', 'ProjectID', 'Name', 'SortOrder'] },
@@ -454,5 +511,45 @@ function addDailyLog(payload) {
     logId, payload.date, payload.projectId, payload.spaceId || '',
     payload.entry, payload.loggedBy, !!payload.hasBlocker, new Date()
   ]);
+
+  var proj = projectName_(payload.projectId);
+  var space = spaceName_(payload.spaceId);
+  var subject = (payload.hasBlocker ? '⚠️ BLOCKER — ' : 'Daily log — ') + proj + ' (' + space + ')';
+  var body = payload.loggedBy + ' logged an update on ' + payload.date + ':\n\n' +
+    payload.entry + '\n\n' + APP_URL;
+  notify_(subject, body);
+
   return { logId: logId };
+}
+
+// ---------- Overdue digest (run daily via a time trigger) ----------
+
+function checkOverdueAndNotify() {
+  var data = getAllData();
+  var today = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd');
+  var lines = [];
+  data.tracker.forEach(function (r) {
+    var sp = data.spaces.filter(function (s) { return s.SpaceID === r.SpaceID; })[0];
+    var proj = data.projects.filter(function (p) { return p.ProjectID === r.ProjectID; })[0];
+    r.Stages.forEach(function (s) {
+      var isOverdue = s.target && s.target < today && s.status !== 'Done' && s.status !== 'N/A';
+      if (s.status === 'Delayed' || isOverdue) {
+        lines.push((proj ? proj.Name : '') + ' — ' + (sp ? sp.Name : '') + ' — ' +
+          r.Category + ' / ' + r.SubItem + ' (' + s.stage + '): ' +
+          (s.status === 'Delayed' ? 'marked Delayed' : 'overdue, target was ' + s.target));
+      }
+    });
+  });
+  if (!lines.length) return;
+  var subject = lines.length + ' delayed/overdue item' + (lines.length === 1 ? '' : 's') + ' across all projects';
+  var body = lines.join('\n') + '\n\n' + APP_URL;
+  notify_(subject, body);
+}
+
+// One-time: run this once from the Apps Script editor to schedule the daily digest.
+function setupDailyOverdueTrigger() {
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === 'checkOverdueAndNotify') ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger('checkOverdueAndNotify').timeBased().everyDays(1).atHour(9).create();
 }
