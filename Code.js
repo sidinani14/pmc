@@ -312,7 +312,10 @@ var TABS = {
   DAILY_LOG: { name: 'DAILY_LOG', headers: ['LogID', 'Date', 'ProjectID', 'SpaceID', 'Entry', 'LoggedBy', 'HasBlocker', 'CreatedAt', 'UpdatesJSON'] },
   SCHEDULE_ACTIVITIES: {
     name: 'SCHEDULE_ACTIVITIES',
-    headers: ['ActivityID', 'ProjectID', 'SpaceID', 'Agency', 'StartDate', 'EndDate', 'Status', 'PredecessorsJSON', 'Notes', 'CreatedAt', 'UpdatedAt', 'PercentComplete']
+    headers: [
+      'ActivityID', 'ProjectID', 'SpaceID', 'Agency', 'StartDate', 'EndDate', 'Status', 'PredecessorsJSON',
+      'Notes', 'CreatedAt', 'UpdatedAt', 'PercentComplete', 'OriginalStartDate', 'OriginalEndDate', 'DelayReason'
+    ]
   }
 };
 
@@ -354,6 +357,9 @@ function getTab_(ss, key) {
     sh.setFrozenRows(1);
   } else if (key === 'SCHEDULE_ACTIVITIES') {
     ensureColumn_(sh, 'PercentComplete', 0);
+    ensureColumn_(sh, 'OriginalStartDate', '');
+    ensureColumn_(sh, 'OriginalEndDate', '');
+    ensureColumn_(sh, 'DelayReason', '');
   } else if (key === 'DAILY_LOG') {
     ensureColumn_(sh, 'UpdatesJSON', '[]');
   } else if (key === 'SPACES') {
@@ -513,7 +519,8 @@ function seedDemoProject_(ss) {
   // story lives in procurement/execution, not design, so execution activities
   // (some In Progress/Delayed) stay valid under the WD-gates-execution rule.
   var designDone = JSON.stringify(DESIGN_STAGES.map(function (s, i) {
-    return { stage: s, status: 'Done', target: daysAgoISO_(90 - i * 10), actual: daysAgoISO_(85 - i * 10), note: '' };
+    var t = daysAgoISO_(90 - i * 10);
+    return { stage: s, status: 'Done', target: t, originalTarget: t, actual: daysAgoISO_(85 - i * 10), note: '', delayReason: '' };
   }));
   spaceNames.forEach(function (name, idx) {
     var spaceId = 'S-' + String(idx + 1).padStart(3, '0');
@@ -561,15 +568,26 @@ function seedDemoProject_(ss) {
     spaceGroupCounters[g.spaceId] = (spaceGroupCounters[g.spaceId] || 0);
     var offset = spaceGroupCounters[g.spaceId] * 4;
     spaceGroupCounters[g.spaceId]++;
-    var startDate = daysAgoISO_(dayDiffFromToday_(g.startTargets.sort()[0]) - offset);
-    var endDate = daysAgoISO_(dayDiffFromToday_(g.installTargets.sort().slice(-1)[0]) - offset);
+    var originalStart = daysAgoISO_(dayDiffFromToday_(g.startTargets.sort()[0]) - offset);
+    var originalEnd = daysAgoISO_(dayDiffFromToday_(g.installTargets.sort().slice(-1)[0]) - offset);
     var status = 'Not Started';
     if (g.statuses.every(function (s) { return s === 'Done'; })) status = 'Done';
-    else if (g.statuses.indexOf('Delayed') > -1) status = 'Delayed';
     else if (g.statuses.some(function (s) { return s === 'In Progress' || s === 'Done'; })) status = 'In Progress';
-    var percentComplete = { 'Done': 100, 'In Progress': 55, 'Delayed': 30, 'Not Started': 0 }[status];
+    var percentComplete = { 'Done': 100, 'In Progress': 55, 'Not Started': 0 }[status];
+
+    // A couple of In-Progress execution activities in the behind-schedule
+    // space get their current end date revised later than original, to show
+    // the derived red/yellow states on the Schedule chart too.
+    var startDate = originalStart, endDate = originalEnd, delayReason = '';
+    if (status === 'In Progress' && g.spaceId !== 'S-001' && offset % 8 === 0) {
+      endDate = addDaysISO_(originalEnd, 10);
+      delayReason = 'Execution Agency Delay';
+    }
     var activityId = 'ACT-' + Utilities.getUuid().slice(0, 6);
-    actSheet.appendRow([activityId, projectId, g.spaceId, g.agency, startDate, endDate, status, '[]', '', now, now, percentComplete]);
+    actSheet.appendRow([
+      activityId, projectId, g.spaceId, g.agency, startDate, endDate, status, '[]', '', now, now,
+      percentComplete, originalStart, originalEnd, delayReason
+    ]);
   });
 
   var engineers = ['Deepak Soni', 'Achal Rathore'];
@@ -587,36 +605,54 @@ function seedDemoProject_(ss) {
   });
 }
 
+var DELAY_REASONS_DEMO_ = ['Material Selection Delay', 'Order Placement Delay', 'Material Delivery Delay (Vendor)'];
+
 function buildDemoStages_(mode, idx) {
-  // Produce a realistic mixed spread of statuses across the 6 stages.
-  // 4 stages: BOQ, Selection, Order Placement, Delivery.
-  var pattern;
+  // Produce a realistic mixed spread of statuses across the 4 material stages
+  // (BOQ, Selection, Order Placement, Delivery) — no literal 'Delayed' status
+  // anywhere; delay is purely derived from original-vs-current/today dates.
+  // A few rows get their current target deliberately revised later than the
+  // original to show the red/yellow derived states, with a delay reason.
+  var pattern, revisedIdx;
   if (mode === 'ahead') {
     var patterns = [
       ['Done', 'Done', 'Done', 'Done'],
       ['Done', 'Done', 'Done', 'In Progress'],
       ['Done', 'Done', 'In Progress', 'Not Started'],
-      ['Done', 'Done', 'Delayed', 'Not Started'],
+      ['Done', 'Done', 'In Progress', 'Not Started'],
       ['Done', 'In Progress', 'Not Started', 'Not Started']
     ];
     pattern = patterns[idx % patterns.length];
+    revisedIdx = (idx % patterns.length === 3) ? 2 : -1; // Order Placement revised late
   } else {
     var patterns2 = [
       ['Done', 'In Progress', 'Not Started', 'Not Started'],
-      ['Done', 'Delayed', 'Not Started', 'Not Started'],
+      ['Done', 'In Progress', 'Not Started', 'Not Started'],
       ['Done', 'Done', 'In Progress', 'Not Started'],
       ['In Progress', 'Not Started', 'Not Started', 'Not Started'],
       ['Not Started', 'Not Started', 'Not Started', 'Not Started']
     ];
     pattern = patterns2[idx % patterns2.length];
+    revisedIdx = (idx % patterns2.length === 1) ? 1 : -1; // Selection revised late
   }
   var stages = [];
   STAGES.forEach(function (stageName, i) {
     var status = pattern[i];
-    var daysAgoForTarget = 60 - i * 15;
-    var target = daysAgoISO_(daysAgoForTarget);
+    // Earlier stages' targets sit in the past (due already); later stages'
+    // targets sit in the future (not yet due) — a believable mixed spread
+    // instead of every open stage automatically reading as overdue.
+    var daysAgoForTarget = (mode === 'ahead' ? 30 : 15) - i * 15;
+    var originalTarget = daysAgoISO_(daysAgoForTarget);
+    var target = originalTarget;
+    var note = '';
+    var delayReason = '';
+    if (i === revisedIdx && status !== 'Done') {
+      target = addDaysISO_(originalTarget, 10 + i * 3);
+      delayReason = DELAY_REASONS_DEMO_[idx % DELAY_REASONS_DEMO_.length];
+      note = 'Revised from original date — see delay reason.';
+    }
     var actual = (status === 'Done') ? daysAgoISO_(daysAgoForTarget + 2) : '';
-    stages.push({ stage: stageName, status: status, target: target, actual: actual, note: '' });
+    stages.push({ stage: stageName, status: status, target: target, originalTarget: originalTarget, actual: actual, note: note, delayReason: delayReason });
   });
   return stages;
 }
@@ -682,6 +718,7 @@ function getAllData() {
     r.Design = JSON.parse(r.DesignJSON || '[]').map(function (s) {
       s.target = normDate_(s.target);
       s.actual = normDate_(s.actual);
+      s.originalTarget = normDate_(s.originalTarget) || s.target;
       return s;
     });
     return r;
@@ -691,6 +728,7 @@ function getAllData() {
     r.Stages = JSON.parse(r.StagesJSON || '[]').map(function (s) {
       s.target = normDate_(s.target);
       s.actual = normDate_(s.actual);
+      s.originalTarget = normDate_(s.originalTarget) || s.target;
       return s;
     });
     r.Split = JSON.parse(r.SplitJSON || '{}');
@@ -706,6 +744,8 @@ function getAllData() {
   var activities = rowsToObjects_(getTab_(ss, 'SCHEDULE_ACTIVITIES')).map(function (r) {
     r.StartDate = normDate_(r.StartDate);
     r.EndDate = normDate_(r.EndDate);
+    r.OriginalStartDate = normDate_(r.OriginalStartDate) || r.StartDate;
+    r.OriginalEndDate = normDate_(r.OriginalEndDate) || r.EndDate;
     r.Predecessors = JSON.parse(r.PredecessorsJSON || '[]');
     return r;
   });
@@ -869,7 +909,7 @@ function ensureActivityForBoqItem_(ss, projectId, spaceId, agency) {
   var predecessors = predecessor ? [predecessor.ActivityID] : [];
   sheet.appendRow([
     activityId, projectId, spaceId, agency, startDate, endDate,
-    'Not Started', JSON.stringify(predecessors), '', now, now, 0
+    'Not Started', JSON.stringify(predecessors), '', now, now, 0, startDate, endDate, ''
   ]);
   return activityId;
 }
@@ -914,6 +954,7 @@ function applyActivityChange_(ss, activityId, changes) {
   if (changes.status !== undefined) current[idx.Status] = changes.status;
   if (changes.notes !== undefined) current[idx.Notes] = changes.notes;
   if (changes.percentComplete !== undefined) current[idx.PercentComplete] = Number(changes.percentComplete);
+  if (changes.delayReason !== undefined) current[idx.DelayReason] = changes.delayReason;
   current[idx.UpdatedAt] = new Date();
   if (changes.status === 'Done') current[idx.PercentComplete] = 100;
   sheet.getRange(row, 1, 1, headers.length).setValues([current]);
@@ -1058,8 +1099,22 @@ function updateBoqItem(payload) {
   return { ok: true };
 }
 
+// Shared write path for a single stage object (BOQ or Design) — captures
+// `originalTarget` the first time a target is ever saved (never overwritten
+// after), and carries an optional delay reason.
+function applyStageChange_(stageObj, payload) {
+  if (payload.status !== undefined) stageObj.status = payload.status;
+  if (payload.target !== undefined) {
+    if (!stageObj.originalTarget) stageObj.originalTarget = payload.target;
+    stageObj.target = payload.target;
+  }
+  if (payload.actual !== undefined) stageObj.actual = payload.actual;
+  if (payload.note !== undefined) stageObj.note = payload.note;
+  if (payload.delayReason !== undefined) stageObj.delayReason = payload.delayReason;
+}
+
 function updateStage(payload) {
-  // payload: { boqItemId, stage, status, target, actual, note }
+  // payload: { boqItemId, stage, status, target, actual, note, delayReason }
   var ss = getSS_();
   var sheet = getTab_(ss, 'BOQ_ITEMS');
   var row = findRowById_(sheet, 'BoqItemID', payload.boqItemId);
@@ -1072,10 +1127,7 @@ function updateStage(payload) {
   var stages = JSON.parse(stagesRaw || '[]');
   var stageObj = stages.filter(function (s) { return s.stage === payload.stage; })[0];
   if (!stageObj) throw new Error('Stage not found');
-  if (payload.status !== undefined) stageObj.status = payload.status;
-  if (payload.target !== undefined) stageObj.target = payload.target;
-  if (payload.actual !== undefined) stageObj.actual = payload.actual;
-  if (payload.note !== undefined) stageObj.note = payload.note;
+  applyStageChange_(stageObj, payload);
 
   var rollup = computeRollup_(stages);
   sheet.getRange(row, stagesColIdx + 1).setValue(JSON.stringify(stages));
@@ -1085,7 +1137,7 @@ function updateStage(payload) {
 }
 
 function updateDesignStage(payload) {
-  // payload: { spaceId, stage, status, target, actual, note }
+  // payload: { spaceId, stage, status, target, actual, note, delayReason }
   var ss = getSS_();
   var sheet = getTab_(ss, 'SPACES');
   var row = findRowById_(sheet, 'SpaceID', payload.spaceId);
@@ -1096,10 +1148,7 @@ function updateDesignStage(payload) {
   var stages = JSON.parse(sheet.getRange(row, designColIdx + 1).getValue() || '[]');
   var stageObj = stages.filter(function (s) { return s.stage === payload.stage; })[0];
   if (!stageObj) throw new Error('Design stage not found');
-  if (payload.status !== undefined) stageObj.status = payload.status;
-  if (payload.target !== undefined) stageObj.target = payload.target;
-  if (payload.actual !== undefined) stageObj.actual = payload.actual;
-  if (payload.note !== undefined) stageObj.note = payload.note;
+  applyStageChange_(stageObj, payload);
 
   var rollup = computeRollup_(stages);
   sheet.getRange(row, designColIdx + 1).setValue(JSON.stringify(stages));

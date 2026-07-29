@@ -8,11 +8,21 @@
   :root{
     --ink:#1c2128; --ink-soft:#4b5563; --paper:#f6f3ee; --card:#ffffff;
     --line:#e4ddd0; --accent:#c1592b; --accent-dark:#a3461e;
-    --done:#1f8a4c; --done-bg:#e5f5ea;
-    --progress:#c9820a; --progress-bg:#fdf1dc;
-    --delayed:#c33429; --delayed-bg:#fbe6e3;
-    --notstarted:#9a978f; --notstarted-bg:#f0ede6;
+    /* Derived visual-status palette: grey=not started/on-time,
+       red=not started/delayed, blue=in progress/on-time,
+       yellow=in progress/delayed, green=done. */
+    --vs-green:#15803d; --vs-green-bg:#dcfce7;
+    --vs-blue:#1d4ed8; --vs-blue-bg:#dbeafe;
+    --vs-yellow:#b45309; --vs-yellow-bg:#fef3c7;
+    --vs-red:#dc2626; --vs-red-bg:#fee2e2;
+    --vs-grey:#57606f; --vs-grey-bg:#e2e5ea;
     --na:#7d8794; --na-bg:#eceef1;
+    /* legacy aliases still used by payment-status chips (Pending/Partial/Paid,
+       an unrelated vocabulary — not part of the derived scheme above) */
+    --done:#15803d; --done-bg:#dcfce7;
+    --progress:#b45309; --progress-bg:#fef3c7;
+    --delayed:#dc2626; --delayed-bg:#fee2e2;
+    --notstarted:#57606f; --notstarted-bg:#e2e5ea;
     --shadow: 0 1px 2px rgba(28,33,40,.06), 0 4px 14px rgba(28,33,40,.05);
     --radius: 10px;
   }
@@ -77,10 +87,11 @@
   /* ---------- Status chips / cells ---------- */
   .status-chip{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:20px;
     font-size:11px;font-weight:700;white-space:nowrap;}
-  .status-chip.Done{background:var(--done-bg);color:var(--done);}
-  .status-chip.In-Progress{background:var(--progress-bg);color:var(--progress);}
-  .status-chip.Delayed{background:var(--delayed-bg);color:var(--delayed);}
-  .status-chip.Not-Started{background:var(--notstarted-bg);color:var(--notstarted);}
+  .status-chip.vs-green{background:var(--vs-green-bg);color:var(--vs-green);}
+  .status-chip.vs-blue{background:var(--vs-blue-bg);color:var(--vs-blue);}
+  .status-chip.vs-yellow{background:var(--vs-yellow-bg);color:var(--vs-yellow);}
+  .status-chip.vs-red{background:var(--vs-red-bg);color:var(--vs-red);}
+  .status-chip.vs-grey{background:var(--vs-grey-bg);color:var(--vs-grey);}
   .status-chip.N-A{background:var(--na-bg);color:var(--na);}
   .status-chip.Partial{background:var(--progress-bg);color:var(--progress);}
   .status-chip.Pending{background:var(--notstarted-bg);color:var(--notstarted);}
@@ -121,13 +132,12 @@
   .subitem-cell .agency-chip{margin-top:3px;}
   .stage-cell{width:44px;height:26px;border-radius:6px;cursor:pointer;border:1px solid transparent;
     display:flex;align-items:center;justify-content:center;position:relative;}
-  .stage-cell.Done{background:var(--done);}
-  .stage-cell.In-Progress{background:var(--progress);}
-  .stage-cell.Delayed{background:var(--delayed);}
-  .stage-cell.Not-Started{background:var(--notstarted-bg);border-color:var(--line);}
+  .stage-cell.vs-green{background:var(--vs-green);}
+  .stage-cell.vs-blue{background:var(--vs-blue);}
+  .stage-cell.vs-yellow{background:var(--vs-yellow);}
+  .stage-cell.vs-red{background:var(--vs-red);}
+  .stage-cell.vs-grey{background:var(--vs-grey-bg);border-color:var(--line);}
   .stage-cell.N-A{background:var(--na-bg);border:1px dashed var(--na);}
-  .stage-cell.overdue::after{content:"!";position:absolute;top:-5px;right:-5px;background:var(--delayed);
-    color:#fff;width:14px;height:14px;border-radius:50%;font-size:10px;line-height:14px;text-align:center;font-weight:800;}
   .stage-cell:hover{outline:2px solid var(--ink);outline-offset:1px;}
   .add-material-row{padding:10px;border-top:1px dashed var(--line);}
 
@@ -150,10 +160,12 @@
   .sched-row-timeline{position:relative;flex:1;height:38px;}
   .sched-bar{position:absolute;top:6px;height:26px;border-radius:6px;cursor:grab;display:flex;align-items:center;
     padding:0 8px;font-size:11px;font-weight:600;color:#fff;white-space:nowrap;overflow:hidden;user-select:none;}
-  .sched-bar.Done{background:var(--done);}
-  .sched-bar.In-Progress{background:var(--progress);}
-  .sched-bar.Delayed{background:var(--delayed);}
-  .sched-bar.Not-Started{background:var(--notstarted);}
+  .sched-bar.vs-green{background:var(--vs-green);}
+  .sched-bar.vs-blue{background:var(--vs-blue);}
+  .sched-bar.vs-yellow{background:var(--vs-yellow);}
+  .sched-bar.vs-red{background:var(--vs-red);}
+  .sched-bar.vs-grey{background:var(--vs-grey);}
+  .sched-bar.critical{outline:3px solid var(--accent);outline-offset:1px;}
   .sched-bar:active{cursor:grabbing;}
   .sched-bar-fill{position:absolute;left:0;top:0;bottom:0;background:rgba(255,255,255,.35);pointer-events:none;}
   .sched-bar-label{position:relative;z-index:1;}
@@ -275,8 +287,22 @@ var STATE = {
   if(role==='client' && project) STATE.locked = true;
 })();
 
-var STATUS_LIST = ['Not Started','In Progress','Done','Delayed','N/A'];
+var STATUS_LIST = ['Not Started','In Progress','Done','N/A'];
+var ACTIVITY_STATUS_LIST = ['Not Started','In Progress','Done'];
+var DELAY_REASONS = ['Design Finalization Delay','Material Selection Delay','Order Placement Delay','Material Delivery Delay (Vendor)','Execution Agency Delay','Other'];
 function cls(status){ return String(status).replace(/\//g,'-').replace(/\s+/g,'-'); }
+// Delay is derived, not stored: compares the current date against the
+// original plan (and, failing that, against today) rather than relying on a
+// manually-set "Delayed" status. Done is always green regardless of timing.
+function deriveVisual(status, originalDate, currentDate){
+  if(status==='Done') return {cls:'vs-green', delayed:false};
+  if(status==='N/A') return {cls:'N-A', delayed:false};
+  var delayed = false;
+  if(currentDate && originalDate && currentDate > originalDate) delayed = true;
+  if(currentDate && todayISO() > currentDate) delayed = true;
+  if(status==='In Progress') return {cls: delayed?'vs-yellow':'vs-blue', delayed:delayed};
+  return {cls: delayed?'vs-red':'vs-grey', delayed:delayed};
+}
 function todayISO(){
   // Local calendar date, not UTC — toISOString() would report the wrong date
   // for part of the day in any positive-UTC-offset timezone (e.g. IST).
@@ -383,18 +409,18 @@ function spacePct(projectId, spaceId){
   return blendPct_(spaces, boqItemsOf(projectId, spaceId), actRows);
 }
 function isOverdue(stage){
-  if(!stage.target) return false;
-  if(stage.status==='Done'||stage.status==='N/A') return false;
-  return stage.target < todayISO();
+  var vis = deriveVisual(stage.status, stage.originalTarget, stage.target);
+  return vis.delayed;
 }
 function delayedItems(projectId){
   var out = [];
   boqItemsOf(projectId).forEach(function(r){
     var sp = STATE.data.spaces.filter(function(s){return s.SpaceID===r.SpaceID;})[0];
     r.Stages.forEach(function(s){
-      if(s.status==='Delayed' || isOverdue(s)){
+      var vis = deriveVisual(s.status, s.originalTarget, s.target);
+      if(vis.delayed){
         out.push({space: sp?sp.Name:'', category:r.Category, material:r.MaterialName, stage:s.stage,
-          status:s.status, target:s.target, overdue:isOverdue(s)});
+          status:s.status, target:s.target, delayReason:s.delayReason, overdue:true});
       }
     });
   });
@@ -405,13 +431,6 @@ function projectCashSummary(projectId){
   var boq=0, inv=0, rec=0;
   rows.forEach(function(r){ boq+=Number(r.Amount)||0; inv+=Number(r.Invoiced)||0; rec+=Number(r.Received)||0; });
   return { boq:boq, invoiced:inv, received:rec, outstanding: inv-rec };
-}
-function nextPaymentDue(projectId){
-  var rows = boqItemsOf(projectId).filter(function(r){
-    return r.DueDate && (Number(r.Invoiced)-Number(r.Received) > 0);
-  });
-  rows.sort(function(a,b){ return new Date(a.DueDate)-new Date(b.DueDate); });
-  return rows[0] || null;
 }
 function daysToMoveIn(project){
   if(!project.TargetMoveIn) return null;
@@ -482,7 +501,7 @@ function renderBelowBar(){
 function tabsForRole(){
   if(STATE.role==='engineer') return [['tracker','Tracker'],['daily','Daily Log']];
   if(STATE.role==='client') return [['client','Overview']];
-  return [['review','Progress Review'],['planning','Planning'],['schedule','Schedule'],['cashflow','Cash Flow'],
+  return [['review','Progress Review'],['planning','Planning'],['schedule','Schedule'],['cashflow','BOQ'],
     ['daily','Daily Tracking'],['report','Progress Report'],['manage','Manage']];
 }
 function setTab(t){ STATE.currentTab = t; render(); }
@@ -497,13 +516,11 @@ function renderProjectList(){
   STATE.data.projects.forEach(function(p){
     var pct = projectPct(p.ProjectID);
     var dtm = daysToMoveIn(p);
-    var due = nextPaymentDue(p.ProjectID);
     html += '<div class="card proj-card" onclick="openProject(\''+p.ProjectID+'\')">'+
       '<h3>'+escapeHtml(p.Name)+'</h3>'+
       '<div style="font-size:12px;color:var(--ink-soft)">'+escapeHtml(p.Address||'')+'</div>'+
       '<div class="pct-row"><div class="pct-bar"><div style="width:'+pct+'%"></div></div><div class="pct-num">'+pct+'%</div></div>'+
       '<div class="meta-row"><span>'+(dtm!==null ? (dtm>=0 ? dtm+' days to move-in' : Math.abs(dtm)+' days past target') : 'No move-in date') +'</span>'+
-      (due ? '<span class="badge warn">'+fmtMoney(Number(due.Invoiced)-Number(due.Received))+' due '+fmtDate(due.DueDate)+'</span>' : '<span class="badge ok">No dues pending</span>')+
       '</div></div>';
   });
   if(STATE.role==='admin'){
@@ -549,84 +566,92 @@ function renderProjectContent(){
 function renderReviewView(){
   var pid = STATE.currentProjectId;
   var pct = projectPct(pid);
-  var cash = projectCashSummary(pid);
   var delayed = delayedItems(pid);
   var spaces = spacesOf(pid);
+  var critical = computeCriticalPath(pid);
 
   var html = '<div class="stat-strip">'+
     statBox('Overall Complete', pct+'%','accent')+
     statBox('Spaces', spaces.length)+
-    statBox('Outstanding', fmtMoney(cash.outstanding),'accent')+
     statBox('Delayed / Overdue Items', delayed.length, delayed.length? 'red':'')+
+    statBox('Critical Path Length', critical.length)+
     '</div>';
 
+  html += '<div class="field-hint" style="margin-bottom:14px;">Click a trade chip on any space below to see what\'s delayed, why, and its original vs. current dates.</div>';
   html += '<div class="section-title">By Space</div><div class="grid-cards">';
   spaces.forEach(function(s){
     var p = spacePct(pid, s.SpaceID);
     html += '<div class="card"><h3>'+escapeHtml(s.Name)+'</h3>'+
       '<div class="pct-row"><div class="pct-bar"><div style="width:'+p+'%"></div></div><div class="pct-num">'+p+'%</div></div>'+
-      categoryChipRow(pid, s.SpaceID) +
+      spaceActivityChips(pid, s.SpaceID) +
       '</div>';
   });
   html += '</div>';
 
-  if(delayed.length){
-    html += '<div class="section-title">Delayed / Overdue</div><div class="table-wrap"><table class="tracker"><thead><tr>'+
-      '<th>Space</th><th>Category</th><th>Material</th><th>Stage</th><th>Status</th><th>Target</th></tr></thead><tbody>';
-    delayed.forEach(function(d){
-      html += '<tr><td>'+escapeHtml(d.space)+'</td><td>'+escapeHtml(d.category)+'</td><td>'+escapeHtml(d.material)+'</td>'+
-        '<td>'+escapeHtml(d.stage)+'</td><td><span class="status-chip '+cls(d.status)+'">'+
-        (d.overdue && d.status!=='Delayed' ? 'Overdue' : d.status)+'</span></td><td>'+fmtDate(d.target)+'</td></tr>';
-    });
-    html += '</tbody></table></div>';
+  if(critical.length){
+    html += '<div class="section-title">Critical Path <span style="font-weight:400;text-transform:none;letter-spacing:0;">— finish this chain first, or the whole project\'s finish date slips</span></div>';
+    html += '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;">'+critical.map(function(a,i){
+      var sp = STATE.data.spaces.filter(function(s){return s.SpaceID===a.SpaceID;})[0];
+      return (i>0?'<span style="color:var(--ink-soft);">&rarr;</span>':'')+
+        '<span class="status-chip vs-grey" style="cursor:pointer;box-shadow:0 0 0 2px var(--accent) inset;" onclick="openActivityDetailModal(\''+a.ActivityID+'\')">'+escapeHtml((sp?sp.Name:'')+' — '+a.Agency)+'</span>';
+    }).join('')+'</div>';
   }
   return html;
 }
 function statBox(label, value, tone){
   return '<div class="stat-box"><div class="label">'+label+'</div><div class="value '+(tone||'')+'">'+value+'</div></div>';
 }
-function categoryChipRow(pid, spaceId){
-  var rows = boqItemsOf(pid, spaceId);
-  var byCat = {};
-  rows.forEach(function(r){
-    if(!byCat[r.Category]) byCat[r.Category] = [];
-    byCat[r.Category].push(r.RollupStatus);
-  });
+// One clickable chip per trade (agency) active in this space, colored by that
+// trade's actual Schedule activity — click through to see original vs.
+// current dates, delay reason, and critical-path status.
+function spaceActivityChips(pid, spaceId){
+  var acts = activitiesOf(pid).filter(function(a){ return a.SpaceID===spaceId; });
+  var critical = computeCriticalPath(pid).map(function(a){return a.ActivityID;});
   var html = '<div class="space-chip-row">';
-  Object.keys(byCat).forEach(function(cat){
-    var statuses = byCat[cat];
-    var worst = 'Done';
-    if(statuses.indexOf('Delayed')>-1) worst='Delayed';
-    else if(statuses.indexOf('In Progress')>-1) worst='In Progress';
-    else if(statuses.every(function(s){return s==='Done';})) worst='Done';
-    else worst='Not Started';
-    html += '<span class="status-chip '+cls(worst)+'"><span class="dot"></span>'+escapeHtml(cat)+'</span>';
+  acts.forEach(function(a){
+    var vis = deriveVisual(a.Status, a.OriginalEndDate, a.EndDate);
+    var isCritical = critical.indexOf(a.ActivityID)>-1;
+    html += '<span class="status-chip '+vis.cls+'" style="cursor:pointer;'+(isCritical?'box-shadow:0 0 0 2px var(--accent) inset;':'')+'" onclick="openActivityDetailModal(\''+a.ActivityID+'\')" title="Click for details">'+
+      '<span class="dot"></span>'+escapeHtml(a.Agency)+(isCritical?' &#9888;':'')+'</span>';
   });
-  if(!Object.keys(byCat).length) html += '<span style="font-size:12px;color:var(--ink-soft);">No BOQ items yet</span>';
+  if(!acts.length) html += '<span style="font-size:12px;color:var(--ink-soft);">No trades started in this space yet</span>';
   return html + '</div>';
 }
 
 // ============================= DESIGN (per space) =============================
+// Rolls up a set of stage objects (already-derived) into one chip class:
+// Done only if every stage is Done; otherwise grey/blue if none are delayed,
+// red/yellow if any are — matching whichever of Not Started/In Progress the
+// rollup text says.
+function rollupVisual(stages, rollupText){
+  if(rollupText==='Done') return 'vs-green';
+  var anyDelayed = stages.some(function(s){ return deriveVisual(s.status, s.originalTarget, s.target).delayed; });
+  if(rollupText==='In Progress') return anyDelayed ? 'vs-yellow' : 'vs-blue';
+  return anyDelayed ? 'vs-red' : 'vs-grey';
+}
 function renderDesignRow(sp){
   var design = sp.Design || [];
   var rollup = sp.DesignRollup || 'Not Started';
   var cells = design.map(function(d){
-    var title = d.stage+': '+d.status+(d.target? ' · target '+fmtDate(d.target):'')+(d.note? ' · '+d.note:'');
+    var vis = deriveVisual(d.status, d.originalTarget, d.target);
+    var title = d.stage+': '+d.status+(vis.delayed?' (delayed)':'')+(d.target? ' · target '+fmtDate(d.target):'')+(d.delayReason?' · '+d.delayReason:'')+(d.note? ' · '+d.note:'');
     return '<div style="text-align:center;">'+
-      '<div class="stage-cell '+cls(d.status)+'" style="width:52px;" title="'+escapeHtml(title)+'" onclick="openDesignStageModal(\''+sp.SpaceID+'\',\''+d.stage+'\')"></div>'+
+      '<div class="stage-cell '+vis.cls+'" style="width:52px;" title="'+escapeHtml(title)+'" onclick="openDesignStageModal(\''+sp.SpaceID+'\',\''+d.stage+'\')"></div>'+
       '<div style="font-size:10px;color:var(--ink-soft);margin-top:3px;font-weight:600;">'+escapeHtml(d.stage)+'</div>'+
     '</div>';
   }).join('');
   return '<div class="design-row" style="display:flex;align-items:center;gap:14px;margin-bottom:10px;padding:8px 10px;background:#fff;border:1px solid var(--line);border-radius:var(--radius);">'+
     '<div style="font-size:11px;text-transform:uppercase;letter-spacing:.03em;color:var(--ink-soft);font-weight:700;">Design</div>'+
     '<div style="display:flex;gap:10px;">'+cells+'</div>'+
-    '<span class="status-chip '+cls(rollup)+'" style="margin-left:auto;">'+rollup+'</span>'+
+    '<span class="status-chip '+rollupVisual(design, rollup)+'" style="margin-left:auto;">'+rollup+'</span>'+
     '</div>';
 }
 function openDesignStageModal(spaceId, stageName){
   var sp = STATE.data.spaces.filter(function(s){return s.SpaceID===spaceId;})[0];
   var stage = (sp.Design||[]).filter(function(d){return d.stage===stageName;})[0];
+  var vis = deriveVisual(stage.status, stage.originalTarget, stage.target);
   var body = '<h3>'+escapeHtml(sp.Name)+' &mdash; Design: '+escapeHtml(stageName)+'</h3>'+
+    (stage.originalTarget && stage.originalTarget!==stage.target ? '<div class="field-hint" style="margin-bottom:10px;">Originally planned for '+fmtDate(stage.originalTarget)+'.</div>' : '')+
     '<div class="field"><label>Status</label><select id="ds-status">'+
       STATUS_LIST.map(function(s){return '<option value="'+s+'" '+(stage.status===s?'selected':'')+'>'+s+'</option>';}).join('')+
     '</select></div>'+
@@ -634,6 +659,9 @@ function openDesignStageModal(spaceId, stageName){
       '<div class="field"><label>Target date</label><input type="date" id="ds-target" value="'+(stage.target||'')+'"></div>'+
       '<div class="field"><label>Actual completion</label><input type="date" id="ds-actual" value="'+(stage.actual||'')+'"></div>'+
     '</div>'+
+    (vis.delayed ? '<div class="field"><label>Delay reason</label><select id="ds-reason">'+
+      DELAY_REASONS.map(function(r){return '<option '+(stage.delayReason===r?'selected':'')+'>'+r+'</option>';}).join('')+
+      '</select></div>' : '')+
     '<div class="field"><label>Note</label><textarea id="ds-note">'+escapeHtml(stage.note||'')+'</textarea></div>'+
     (stageName==='WD' ? '<div class="field-hint">Marking WD Done unlocks execution (In Progress/Done) for every trade in this space, and auto-shifts any execution activity still scheduled to start earlier.</div>' : '')+
     '<div class="modal-actions"><button class="btn" onclick="closeModal()">Cancel</button>'+
@@ -641,12 +669,14 @@ function openDesignStageModal(spaceId, stageName){
   showModal(body);
 }
 function saveDesignStage(spaceId, stageName){
+  var reasonEl = document.getElementById('ds-reason');
   var payload = {
     spaceId: spaceId, stage: stageName,
     status: document.getElementById('ds-status').value,
     target: document.getElementById('ds-target').value,
     actual: document.getElementById('ds-actual').value,
-    note: document.getElementById('ds-note').value
+    note: document.getElementById('ds-note').value,
+    delayReason: reasonEl ? reasonEl.value : ''
   };
   apiPost('updateDesignStage', payload).then(function(){
     closeModal(); toast('Saved'); refresh();
@@ -671,17 +701,17 @@ function renderTrackerView(editable){
     html += '<div class="space-block"><div class="space-head"><h3>'+escapeHtml(sp.Name)+'</h3>'+
       '<span class="badge ok">'+spacePct(pid, sp.SpaceID)+'% complete</span></div>';
     html += renderDesignRow(sp);
-    html += '<div class="table-wrap"><table class="tracker"><thead><tr><th>Material</th><th>Unit</th><th>Qty</th><th>Amount</th>';
+    html += '<div class="table-wrap"><table class="tracker"><thead><tr><th>Material</th><th>Unit</th><th>Qty</th>';
     schema.materialStages.forEach(function(st){ html += '<th style="text-align:center">'+st+'</th>'; });
     html += '</tr></thead><tbody>';
     rows.forEach(function(r){
       html += '<tr><td class="subitem-cell"><span class="cat">'+escapeHtml(r.Category)+'</span>'+escapeHtml(r.MaterialName)+
         '<span class="agency-chip">'+escapeHtml(r.Agency)+'</span></td>'+
-        '<td>'+escapeHtml(r.Unit)+'</td><td>'+r.Quantity+'</td><td>'+fmtMoney(r.Amount)+'</td>';
+        '<td>'+escapeHtml(r.Unit)+'</td><td>'+r.Quantity+'</td>';
       r.Stages.forEach(function(s){
-        var overdueFlag = isOverdue(s) ? ' overdue' : '';
-        var title = s.stage+': '+s.status+(s.target? ' · target '+fmtDate(s.target):'')+(s.note? ' · '+s.note:'');
-        html += '<td style="text-align:center"><div class="stage-cell '+cls(s.status)+overdueFlag+'" title="'+escapeHtml(title)+'" '+
+        var vis = deriveVisual(s.status, s.originalTarget, s.target);
+        var title = s.stage+': '+s.status+(vis.delayed?' (delayed)':'')+(s.target? ' · target '+fmtDate(s.target):'')+(s.delayReason?' · '+s.delayReason:'')+(s.note? ' · '+s.note:'');
+        html += '<td style="text-align:center"><div class="stage-cell '+vis.cls+'" title="'+escapeHtml(title)+'" '+
           (editable? 'onclick="openStageModal(\''+r.BoqItemID+'\',\''+s.stage+'\')"' : 'onclick="openStageModal(\''+r.BoqItemID+'\',\''+s.stage+'\',true)"')+
           '></div></td>';
       });
@@ -715,9 +745,11 @@ function openStageModal(boqItemId, stageName, readOnly){
   var row = STATE.data.boqItems.filter(function(t){return t.BoqItemID===boqItemId;})[0];
   var stage = row.Stages.filter(function(s){return s.stage===stageName;})[0];
   var space = STATE.data.spaces.filter(function(s){return s.SpaceID===row.SpaceID;})[0];
+  var vis = deriveVisual(stage.status, stage.originalTarget, stage.target);
   var body =
     '<h3>'+escapeHtml(row.MaterialName)+' &mdash; '+escapeHtml(stageName)+'</h3>'+
     '<div style="font-size:12px;color:var(--ink-soft);margin-bottom:14px;">'+escapeHtml(space?space.Name:'')+' &middot; '+escapeHtml(row.Category)+' &middot; '+escapeHtml(row.Agency)+'</div>'+
+    (stage.originalTarget && stage.originalTarget!==stage.target ? '<div class="field-hint" style="margin-bottom:10px;">Originally planned for '+fmtDate(stage.originalTarget)+'.</div>' : '')+
     '<div class="field"><label>Status</label><select id="m-status" '+(readOnly?'disabled':'')+'>'+
       STATUS_LIST.map(function(s){return '<option value="'+s+'" '+(stage.status===s?'selected':'')+'>'+s+'</option>';}).join('')+
     '</select></div>'+
@@ -725,6 +757,9 @@ function openStageModal(boqItemId, stageName, readOnly){
       '<div class="field"><label>'+(stageName==='Delivery'?'Expected Delivery Date (ETD)':'Target date')+'</label><input type="date" id="m-target" value="'+(stage.target||'')+'" '+(readOnly?'disabled':'')+'></div>'+
       '<div class="field"><label>Actual completion</label><input type="date" id="m-actual" value="'+(stage.actual||'')+'" '+(readOnly?'disabled':'')+'></div>'+
     '</div>'+
+    (vis.delayed && !readOnly ? '<div class="field"><label>Delay reason</label><select id="m-reason">'+
+      DELAY_REASONS.map(function(r){return '<option '+(stage.delayReason===r?'selected':'')+'>'+r+'</option>';}).join('')+
+      '</select></div>' : '')+
     '<div class="field"><label>Note</label><textarea id="m-note" '+(readOnly?'disabled':'')+'>'+escapeHtml(stage.note||'')+'</textarea></div>'+
     '<div class="modal-actions">'+
       '<button class="btn" onclick="closeModal()">'+(readOnly?'Close':'Cancel')+'</button>'+
@@ -733,12 +768,14 @@ function openStageModal(boqItemId, stageName, readOnly){
   showModal(body);
 }
 function saveStage(boqItemId, stageName){
+  var reasonEl = document.getElementById('m-reason');
   var payload = {
     boqItemId: boqItemId, stage: stageName,
     status: document.getElementById('m-status').value,
     target: document.getElementById('m-target').value,
     actual: document.getElementById('m-actual').value,
-    note: document.getElementById('m-note').value
+    note: document.getElementById('m-note').value,
+    delayReason: reasonEl ? reasonEl.value : ''
   };
   apiPost('updateStage', payload).then(function(){
     closeModal(); toast('Saved'); refresh();
@@ -801,6 +838,60 @@ var SCHED_PX_PER_DAY = 28;
 function activitiesOf(projectId){
   return STATE.data.activities.filter(function(a){ return a.ProjectID===projectId; });
 }
+// The critical path here is the longest chain of back-to-back (zero-slack)
+// predecessor -> successor activities ending at the project's latest finish.
+// Since activities already carry real scheduled dates (not just abstract
+// durations), "critical" reduces to: walk backward from whichever activity
+// finishes last, at each step only following a predecessor whose EndDate
+// exactly matches the successor's StartDate — a predecessor with any gap has
+// slack and isn't blocking anything.
+function computeCriticalPath(projectId){
+  var acts = activitiesOf(projectId);
+  if(!acts.length) return [];
+  var byId = {};
+  acts.forEach(function(a){ byId[a.ActivityID] = a; });
+  var tail = acts.reduce(function(best,a){ return (!best || a.EndDate>best.EndDate) ? a : best; }, null);
+  var chain = [tail];
+  var current = tail;
+  var guard = 0;
+  while(guard++ < acts.length){
+    var preds = (current.Predecessors||[]).map(function(id){ return byId[id]; }).filter(Boolean);
+    var zeroSlack = preds.filter(function(p){ return p.EndDate === current.StartDate; });
+    if(!zeroSlack.length) break;
+    zeroSlack.sort(function(a,b){ return b.EndDate>a.EndDate?1:-1; });
+    current = zeroSlack[0];
+    chain.push(current);
+  }
+  return chain.reverse();
+}
+function openActivityDetailModal(activityId){
+  var act = STATE.data.activities.filter(function(a){return a.ActivityID===activityId;})[0];
+  if(!act) return;
+  var sp = STATE.data.spaces.filter(function(s){return s.SpaceID===act.SpaceID;})[0];
+  var vis = deriveVisual(act.Status, act.OriginalEndDate, act.EndDate);
+  var isCritical = computeCriticalPath(STATE.currentProjectId).some(function(a){return a.ActivityID===activityId;});
+  var lines = boqItemsOf(STATE.currentProjectId, act.SpaceID).filter(function(r){return r.Agency===act.Agency;});
+
+  var body = '<h3>'+escapeHtml(act.Agency)+' &mdash; '+escapeHtml(sp?sp.Name:'')+'</h3>'+
+    '<span class="status-chip '+vis.cls+'" style="margin-bottom:12px;">'+act.Status+(vis.delayed?' · Delayed':'')+'</span>'+
+    (isCritical ? '<div class="field-hint" style="color:var(--accent-dark);font-weight:600;margin:8px 0;">&#9888; On the critical path &mdash; this activity is currently the bottleneck for the whole project\'s finish date.</div>' : '')+
+    '<div class="field-row" style="margin-top:10px;">'+
+      '<div class="field"><label>Originally Planned</label><div style="font-size:13.5px;padding:6px 0;">'+fmtDate(act.OriginalStartDate)+' &rarr; '+fmtDate(act.OriginalEndDate)+'</div></div>'+
+      '<div class="field"><label>Currently Scheduled</label><div style="font-size:13.5px;padding:6px 0;font-weight:700;">'+fmtDate(act.StartDate)+' &rarr; '+fmtDate(act.EndDate)+'</div></div>'+
+    '</div>'+
+    (act.DelayReason ? '<div class="field"><label>Delay Reason</label><div style="font-size:13.5px;">'+escapeHtml(act.DelayReason)+'</div></div>' : '')+
+    (act.Notes ? '<div class="field"><label>Notes</label><div style="font-size:13.5px;">'+escapeHtml(act.Notes)+'</div></div>' : '')+
+    '<div class="section-title" style="margin-top:16px;">Materials under '+escapeHtml(act.Agency)+'</div>'+
+    (lines.length ? '<ul class="plain">'+lines.map(function(r){
+        var stageVis = r.Stages.map(function(s){return deriveVisual(s.status,s.originalTarget,s.target);});
+        var anyDelayed = stageVis.some(function(v){return v.delayed;});
+        return '<li>'+escapeHtml(r.MaterialName)+' &mdash; '+escapeHtml(r.RollupStatus)+(anyDelayed?' <span style="color:var(--vs-red);font-weight:700;">(delayed)</span>':'')+'</li>';
+      }).join('')+'</ul>' : '<p style="color:var(--ink-soft);font-size:13px;">No BOQ lines under this trade yet.</p>')+
+    '<div class="modal-actions"><button class="btn" onclick="closeModal()">Close</button>'+
+    (STATE.role==='admin' ? '<button class="btn primary" onclick="closeModal();openActivityModal(\''+activityId+'\')">Edit Activity</button>' : '')+
+    '</div>';
+  showModal(body);
+}
 // Parse and arithmetic done entirely in UTC (not local time) so day-math is
 // correct regardless of the browser's timezone offset — a date-only string
 // parsed with a local-time suffix + re-serialized via toISOString() (which is
@@ -841,6 +932,7 @@ function renderScheduleChart(pid, opts){
   var todayOffset = dayDiff(rangeStart, todayISO());
   header += '</div></div>';
 
+  var critical = computeCriticalPath(pid).map(function(a){return a.ActivityID;});
   var body = '';
   spaces.forEach(function(sp){
     var rows = acts.filter(function(a){ return a.SpaceID===sp.SpaceID; });
@@ -850,10 +942,12 @@ function renderScheduleChart(pid, opts){
       var left = dayDiff(rangeStart, a.StartDate)*SCHED_PX_PER_DAY;
       var width = Math.max(dayDiff(a.StartDate, a.EndDate)*SCHED_PX_PER_DAY, 20);
       var pct = Math.max(0, Math.min(100, Number(a.PercentComplete)||0));
+      var vis = deriveVisual(a.Status, a.OriginalEndDate, a.EndDate);
+      var isCritical = critical.indexOf(a.ActivityID)>-1;
       body += '<div class="sched-row">'+
-        '<div class="sched-row-label">'+escapeHtml(a.Agency)+'<div style="font-size:10.5px;color:var(--ink-soft);">'+fmtDate(a.StartDate)+' &rarr; '+fmtDate(a.EndDate)+'</div></div>'+
+        '<div class="sched-row-label">'+escapeHtml(a.Agency)+(isCritical?' <span style="color:var(--accent-dark);font-weight:800;" title="On the critical path">&#9888;</span>':'')+'<div style="font-size:10.5px;color:var(--ink-soft);">'+fmtDate(a.StartDate)+' &rarr; '+fmtDate(a.EndDate)+'</div></div>'+
         '<div class="sched-row-timeline" style="width:'+timelineWidth+'px;">'+
-          '<div class="sched-bar '+cls(a.Status)+'" data-activity-id="'+a.ActivityID+'" style="left:'+left+'px;width:'+width+'px;'+(opts.readOnly?'cursor:default;':'')+'" title="'+escapeHtml(a.Agency+': '+a.Status+' ('+pct+'%)')+'">'+
+          '<div class="sched-bar '+vis.cls+(isCritical?' critical':'')+'" data-activity-id="'+a.ActivityID+'" style="left:'+left+'px;width:'+width+'px;'+(opts.readOnly?'cursor:default;':'')+'" title="'+escapeHtml(a.Agency+': '+a.Status+' ('+pct+'%)'+(isCritical?' · critical path':''))+'">'+
             '<div class="sched-bar-fill" style="width:'+pct+'%;"></div>'+
             '<span class="sched-bar-label">'+escapeHtml(a.Agency)+'</span>'+
             (opts.readOnly? '' : '<div class="sched-resize" data-activity-id="'+a.ActivityID+'"></div>')+
@@ -965,11 +1059,13 @@ function openActivityModal(activityId){
   var preds = act.Predecessors||[];
   var wd = (sp&&sp.Design||[]).filter(function(d){return d.stage==='WD';})[0];
   var wdBlocked = !wd || wd.status!=='Done';
+  var vis = deriveVisual(act.Status, act.OriginalEndDate, act.EndDate);
   var body = '<h3>'+escapeHtml(act.Agency)+' &mdash; '+escapeHtml(sp?sp.Name:'')+'</h3>'+
-    (wdBlocked ? '<div class="field-hint" style="color:var(--delayed);margin-bottom:10px;">Design (WD) not yet delivered for this space &mdash; this activity can\'t move to In Progress/Done yet.</div>' : '')+
+    (wdBlocked ? '<div class="field-hint" style="color:var(--vs-red);margin-bottom:10px;">Design (WD) not yet delivered for this space &mdash; this activity can\'t move to In Progress/Done yet.</div>' : '')+
+    (act.OriginalEndDate && act.OriginalEndDate!==act.EndDate ? '<div class="field-hint" style="margin-bottom:10px;">Originally planned to finish '+fmtDate(act.OriginalEndDate)+'.</div>' : '')+
     '<div class="field-row">'+
       '<div class="field"><label>Status</label><select id="act-status">'+
-        ['Not Started','In Progress','Done','Delayed'].map(function(s){return '<option value="'+s+'" '+(act.Status===s?'selected':'')+'>'+s+'</option>';}).join('')+
+        ACTIVITY_STATUS_LIST.map(function(s){return '<option value="'+s+'" '+(act.Status===s?'selected':'')+'>'+s+'</option>';}).join('')+
       '</select></div>'+
       '<div class="field"><label>% Complete</label><input type="number" id="act-percent" min="0" max="100" value="'+(act.PercentComplete||0)+'"></div>'+
     '</div>'+
@@ -978,6 +1074,9 @@ function openActivityModal(activityId){
       '<div class="field"><label>Duration (days)</label><input type="number" id="act-duration" min="1" value="'+dayDiff(act.StartDate,act.EndDate)+'" oninput="syncActEndFromDuration()"></div>'+
     '</div>'+
     '<div class="field"><label>End Date</label><input type="date" id="act-end" value="'+act.EndDate+'" onchange="syncActDuration()"></div>'+
+    (vis.delayed ? '<div class="field"><label>Delay reason</label><select id="act-reason">'+
+      DELAY_REASONS.map(function(r){return '<option '+(act.DelayReason===r?'selected':'')+'>'+r+'</option>';}).join('')+
+      '</select></div>' : '')+
     '<div class="field"><label>Notes</label><textarea id="act-notes">'+escapeHtml(act.Notes||'')+'</textarea></div>'+
     '<div class="field"><label>Depends on (must finish before this can start)</label>'+
     (others.length ? others.map(function(o){
@@ -1004,13 +1103,15 @@ function syncActDuration(){
   document.getElementById('act-duration').value = Math.max(1, dayDiff(start, end));
 }
 function saveActivity(activityId){
+  var reasonEl = document.getElementById('act-reason');
   var payload = {
     activityId: activityId,
     status: document.getElementById('act-status').value,
     startDate: document.getElementById('act-start').value,
     endDate: document.getElementById('act-end').value,
     notes: document.getElementById('act-notes').value,
-    percentComplete: Number(document.getElementById('act-percent').value)||0
+    percentComplete: Number(document.getElementById('act-percent').value)||0,
+    delayReason: reasonEl ? reasonEl.value : ''
   };
   var deps = Array.from(document.querySelectorAll('.act-dep-cb:checked')).map(function(cb){return cb.value;});
   apiPost('updateActivity', payload).then(function(){
@@ -1061,7 +1162,7 @@ function renderCashflowView(){
 function openCashflowModal(boqItemId){
   var r = STATE.data.boqItems.filter(function(c){return c.BoqItemID===boqItemId;})[0];
   var s = r.Split||{};
-  var body = '<h3>'+escapeHtml(r.MaterialName)+' &mdash; Cash Flow</h3>'+
+  var body = '<h3>'+escapeHtml(r.MaterialName)+' &mdash; BOQ / Payment</h3>'+
     '<div class="field-row">'+
       '<div class="field"><label>Quantity</label><input type="number" id="cf-qty" value="'+(r.Quantity||0)+'"></div>'+
       '<div class="field"><label>Rate</label><input id="cf-rate" value="'+fmtMoney(r.Rate)+'" readonly></div>'+
@@ -1163,7 +1264,7 @@ function renderDailyActivityRows(){
       '<div style="font-weight:700;font-size:13px;margin-bottom:6px;">'+escapeHtml(a.Agency)+'</div>'+
       '<div class="field-row">'+
         '<div class="field" style="margin-bottom:6px;"><label>Status</label><select class="dl-act-status" data-activity-id="'+a.ActivityID+'">'+
-          ['Not Started','In Progress','Done','Delayed'].map(function(s){
+          ACTIVITY_STATUS_LIST.map(function(s){
             var label = s==='In Progress' ? 'Ongoing' : s;
             return '<option value="'+s+'" '+(a.Status===s?'selected':'')+'>'+label+'</option>';
           }).join('')+
@@ -1238,7 +1339,7 @@ function pendingProcurement(pid){
 function delayedAgencies(pid){
   var today = todayISO();
   return activitiesOf(pid).filter(function(a){
-    return a.Status==='Delayed' || (a.EndDate < today && a.Status!=='Done');
+    return deriveVisual(a.Status, a.OriginalEndDate, a.EndDate).delayed;
   }).map(function(a){
     var sp = STATE.data.spaces.filter(function(s){return s.SpaceID===a.SpaceID;})[0];
     return { agency: a.Agency, space: sp?sp.Name:'', overdueDays: a.EndDate<today ? dayDiff(a.EndDate, today) : 0, status: a.Status };
@@ -1248,11 +1349,11 @@ function renderReportView(){
   var pid = STATE.currentProjectId;
   var p = STATE.data.projects.filter(function(x){return x.ProjectID===pid;})[0];
   var pct = projectPct(pid);
-  var cash = projectCashSummary(pid);
   var delayed = delayedItems(pid);
   var pva = plannedVsActual(pid);
   var procurement = pendingProcurement(pid);
   var agencies = delayedAgencies(pid);
+  var critical = computeCriticalPath(pid);
   var weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate()-7);
   var completions = [];
   boqItemsOf(pid).forEach(function(r){
@@ -1263,8 +1364,6 @@ function renderReportView(){
       }
     });
   });
-  var dues = boqItemsOf(pid).filter(function(r){ return Number(r.Invoiced)-Number(r.Received) > 0; });
-
   var html = '<div class="no-print" style="margin-bottom:14px;"><button class="btn primary" onclick="window.print()">Print / Export</button></div>';
   html += '<div class="report-card">'+
     '<h2>'+escapeHtml(p.Name)+' &mdash; Progress Report</h2>'+
@@ -1282,10 +1381,10 @@ function renderReportView(){
       '</div>'+
     '</div></div>';
 
-  html += '<div class="stat-strip"><div class="stat-box"><div class="label">Outstanding Payments</div><div class="value">'+fmtMoney(cash.outstanding)+'</div></div>'+
-    '<div class="stat-box"><div class="label">Delayed Items</div><div class="value '+(delayed.length?'red':'')+'">'+delayed.length+'</div></div>'+
+  html += '<div class="stat-strip"><div class="stat-box"><div class="label">Delayed Items</div><div class="value '+(delayed.length?'red':'')+'">'+delayed.length+'</div></div>'+
     '<div class="stat-box"><div class="label">Pending Procurement</div><div class="value '+(procurement.length?'accent':'')+'">'+procurement.length+'</div></div>'+
-    '<div class="stat-box"><div class="label">Agencies Running Late</div><div class="value '+(agencies.length?'red':'')+'">'+agencies.length+'</div></div></div>';
+    '<div class="stat-box"><div class="label">Agencies Running Late</div><div class="value '+(agencies.length?'red':'')+'">'+agencies.length+'</div></div>'+
+    '<div class="stat-box"><div class="label">Critical Path Length</div><div class="value">'+critical.length+'</div></div></div>';
 
   html += '<div class="section-title">This Week\'s Completions</div>';
   html += completions.length ? '<ul class="plain">'+completions.map(function(c){return '<li>'+c+'</li>';}).join('')+'</ul>' : '<p style="color:var(--ink-soft);font-size:13px;">No stage completions logged in the last 7 days.</p>';
@@ -1302,14 +1401,15 @@ function renderReportView(){
 
   html += '<div class="section-title">Delayed Items (Stage-level)</div>';
   html += delayed.length ? '<ul class="plain">'+delayed.map(function(d){
-      var sp = d.space;
-      return '<li>'+escapeHtml(sp)+' &mdash; '+escapeHtml(d.material)+' ('+escapeHtml(d.stage)+') &mdash; '+ (d.overdue&&d.status!=='Delayed'?'overdue, target was '+fmtDate(d.target):'marked delayed')+'</li>';
+      return '<li>'+escapeHtml(d.space)+' &mdash; '+escapeHtml(d.material)+' ('+escapeHtml(d.stage)+') &mdash; target was '+fmtDate(d.target)+(d.delayReason?' &mdash; '+escapeHtml(d.delayReason):'')+'</li>';
     }).join('')+'</ul>' : '<p style="color:var(--ink-soft);font-size:13px;">None &mdash; on track.</p>';
 
-  html += '<div class="section-title">Upcoming Payments</div>';
-  html += dues.length ? '<ul class="plain">'+dues.map(function(d){
-      return '<li>'+escapeHtml(d.MaterialName)+' &mdash; '+fmtMoney(Number(d.Invoiced)-Number(d.Received))+' due '+fmtDate(d.DueDate)+'</li>';
-    }).join('')+'</ul>' : '<p style="color:var(--ink-soft);font-size:13px;">No payments currently due.</p>';
+  html += '<div class="section-title">Critical Path <span style="font-weight:400;text-transform:none;letter-spacing:0;">— finish this chain first, or the whole project\'s finish date slips</span></div>';
+  html += critical.length ? '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;">'+critical.map(function(a,i){
+      var sp = STATE.data.spaces.filter(function(s){return s.SpaceID===a.SpaceID;})[0];
+      return (i>0?'<span style="color:var(--ink-soft);">&rarr;</span>':'')+
+        '<span class="status-chip vs-grey" style="cursor:pointer;box-shadow:0 0 0 2px var(--accent) inset;" onclick="openActivityDetailModal(\''+a.ActivityID+'\')">'+escapeHtml((sp?sp.Name:'')+' — '+a.Agency)+'</span>';
+    }).join('')+'</div>' : '<p style="color:var(--ink-soft);font-size:13px;">No schedule activities yet.</p>';
 
   html += '</div>';
   return html;
@@ -1462,8 +1562,6 @@ function renderClientView(){
   var p = STATE.data.projects.filter(function(x){return x.ProjectID===pid;})[0];
   var pct = projectPct(pid);
   var dtm = daysToMoveIn(p);
-  var cash = projectCashSummary(pid);
-  var due = nextPaymentDue(pid);
   var spaces = spacesOf(pid);
 
   var html = '<div class="client-hero"><div class="lbl">Days to Move-in</div>'+
@@ -1473,8 +1571,6 @@ function renderClientView(){
 
   html += '<div class="client-grid">'+
     statBox('Overall Progress', pct+'%','accent')+
-    statBox('Total Amount Due', fmtMoney(cash.outstanding), cash.outstanding>0?'red':'')+
-    statBox('Next Payment', due ? fmtMoney(Number(due.Invoiced)-Number(due.Received))+' by '+fmtDate(due.DueDate) : 'None currently')+
     '</div>';
 
   html += '<div class="section-title">Progress by Space</div><div class="grid-cards">';
@@ -1482,7 +1578,7 @@ function renderClientView(){
     var p2 = spacePct(pid, s.SpaceID);
     html += '<div class="card"><h3>'+escapeHtml(s.Name)+'</h3>'+
       '<div class="pct-row"><div class="pct-bar"><div style="width:'+p2+'%"></div></div><div class="pct-num">'+p2+'%</div></div>'+
-      categoryChipRow(pid, s.SpaceID)+
+      spaceActivityChips(pid, s.SpaceID)+
       '</div>';
   });
   html += '</div>';
