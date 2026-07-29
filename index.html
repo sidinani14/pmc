@@ -155,7 +155,9 @@
   .sched-bar.Delayed{background:var(--delayed);}
   .sched-bar.Not-Started{background:var(--notstarted);}
   .sched-bar:active{cursor:grabbing;}
-  .sched-resize{position:absolute;right:0;top:0;bottom:0;width:8px;cursor:ew-resize;}
+  .sched-bar-fill{position:absolute;left:0;top:0;bottom:0;background:rgba(255,255,255,.35);pointer-events:none;}
+  .sched-bar-label{position:relative;z-index:1;}
+  .sched-resize{position:absolute;right:0;top:0;bottom:0;width:8px;cursor:ew-resize;z-index:2;}
   .sched-svg{position:absolute;top:0;left:0;pointer-events:none;z-index:2;}
   .sched-today{position:absolute;top:0;bottom:0;width:2px;background:var(--accent);opacity:.5;z-index:3;}
 
@@ -203,6 +205,11 @@
   ul.plain{margin:0;padding-left:18px;}
   ul.plain li{margin-bottom:5px;font-size:13.5px;}
   .print-only{display:none;}
+  .progress-ring{width:110px;height:110px;min-width:110px;border-radius:50%;position:relative;flex-shrink:0;
+    background:conic-gradient(var(--accent) calc(var(--pct)*1%), var(--notstarted-bg) 0);}
+  .progress-ring::before{content:"";position:absolute;inset:11px;border-radius:50%;background:#fff;}
+  .progress-ring .ring-label{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    font-size:22px;font-weight:800;color:var(--accent-dark);}
   @media print{
     .topbar,.projectbar,.tabs,.no-print{display:none !important;}
     .content{padding:0;max-width:none;}
@@ -509,7 +516,11 @@ function closeCatalog(){
 // ============================= RENDER: PROJECT CONTENT ROUTER =============================
 function renderProjectContent(){
   var el = document.getElementById('content');
-  if(STATE.role==='client'){ el.innerHTML = renderClientView(); return; }
+  if(STATE.role==='client'){
+    el.innerHTML = renderClientView();
+    if(document.getElementById('schedGridClient')) drawDependencyLines('schedGridClient', 'schedSvgClient', STATE.currentProjectId);
+    return;
+  }
   switch(STATE.currentTab){
     case 'tracker': el.innerHTML = renderTrackerView(true); break;
     case 'review': el.innerHTML = renderReviewView(); break;
@@ -745,11 +756,16 @@ function addDaysISO(iso, n){
   return d.toISOString().slice(0,10);
 }
 function renderScheduleView(){
-  var pid = STATE.currentProjectId;
+  return renderScheduleChart(STATE.currentProjectId, { readOnly: false, gridId: 'schedGrid', svgId: 'schedSvg' });
+}
+function renderScheduleChart(pid, opts){
+  opts = opts || {};
+  var gridId = opts.gridId || 'schedGridRO';
+  var svgId = opts.svgId || 'schedSvgRO';
   var acts = activitiesOf(pid);
   var spaces = spacesOf(pid);
   if(!acts.length){
-    return '<div class="empty-state">No schedule activities yet &mdash; add materials to a space in the Planning tab and an activity bar will appear here automatically for each trade involved.</div>';
+    return '<div class="empty-state">No schedule activities yet.</div>';
   }
   var starts = acts.map(function(a){return a.StartDate;}).sort();
   var ends = acts.map(function(a){return a.EndDate;}).sort();
@@ -774,30 +790,35 @@ function renderScheduleView(){
     rows.forEach(function(a){
       var left = dayDiff(rangeStart, a.StartDate)*SCHED_PX_PER_DAY;
       var width = Math.max(dayDiff(a.StartDate, a.EndDate)*SCHED_PX_PER_DAY, 20);
+      var pct = Math.max(0, Math.min(100, Number(a.PercentComplete)||0));
       body += '<div class="sched-row">'+
         '<div class="sched-row-label">'+escapeHtml(a.Agency)+'<div style="font-size:10.5px;color:var(--ink-soft);">'+fmtDate(a.StartDate)+' &rarr; '+fmtDate(a.EndDate)+'</div></div>'+
         '<div class="sched-row-timeline" style="width:'+timelineWidth+'px;">'+
-          '<div class="sched-bar '+cls(a.Status)+'" data-activity-id="'+a.ActivityID+'" style="left:'+left+'px;width:'+width+'px;" title="'+escapeHtml(a.Agency+': '+a.Status)+'">'+
-            escapeHtml(a.Agency)+
-            '<div class="sched-resize" data-activity-id="'+a.ActivityID+'"></div>'+
+          '<div class="sched-bar '+cls(a.Status)+'" data-activity-id="'+a.ActivityID+'" style="left:'+left+'px;width:'+width+'px;'+(opts.readOnly?'cursor:default;':'')+'" title="'+escapeHtml(a.Agency+': '+a.Status+' ('+pct+'%)')+'">'+
+            '<div class="sched-bar-fill" style="width:'+pct+'%;"></div>'+
+            '<span class="sched-bar-label">'+escapeHtml(a.Agency)+'</span>'+
+            (opts.readOnly? '' : '<div class="sched-resize" data-activity-id="'+a.ActivityID+'"></div>')+
           '</div>'+
         '</div></div>';
     });
     body += '</div>';
   });
 
-  return '<div class="field-hint" style="margin-bottom:10px;">Drag a bar to reschedule, drag its right edge to change duration, click it to edit status / dependencies. Dependent activities shift automatically.</div>'+
-    '<div class="sched-wrap"><div class="sched-grid" id="schedGrid">'+
+  var hint = opts.readOnly ? '' :
+    '<div class="field-hint" style="margin-bottom:10px;">Drag a bar to reschedule, drag its right edge to change duration, click it to edit status / dependencies. Dependent activities shift automatically.</div>';
+
+  return hint+
+    '<div class="sched-wrap"><div class="sched-grid" id="'+gridId+'">'+
     header + body +
     '<div class="sched-today" style="left:'+(220+todayOffset*SCHED_PX_PER_DAY)+'px;top:0;bottom:0;" title="Today"></div>'+
-    '<svg class="sched-svg" id="schedSvg"></svg>'+
+    '<svg class="sched-svg" id="'+svgId+'"></svg>'+
     '</div></div>';
 }
 
 function attachScheduleHandlers(){
   var grid = document.getElementById('schedGrid');
   if(!grid) return;
-  drawDependencyLines();
+  drawDependencyLines('schedGrid', 'schedSvg');
   grid.querySelectorAll('.sched-bar').forEach(function(bar){
     bar.addEventListener('mousedown', function(e){
       if(e.target.classList.contains('sched-resize')) return;
@@ -812,15 +833,15 @@ function attachScheduleHandlers(){
     });
   });
 }
-function drawDependencyLines(){
-  var grid = document.getElementById('schedGrid');
-  var svg = document.getElementById('schedSvg');
+function drawDependencyLines(gridId, svgId, projectId){
+  var grid = document.getElementById(gridId||'schedGrid');
+  var svg = document.getElementById(svgId||'schedSvg');
   if(!grid || !svg) return;
   var gridRect = grid.getBoundingClientRect();
   svg.setAttribute('width', grid.scrollWidth);
   svg.setAttribute('height', grid.scrollHeight);
   var lines = '';
-  var acts = activitiesOf(STATE.currentProjectId);
+  var acts = activitiesOf(projectId||STATE.currentProjectId);
   acts.forEach(function(a){
     (a.Predecessors||[]).forEach(function(predId){
       var predEl = grid.querySelector('.sched-bar[data-activity-id="'+predId+'"]');
@@ -884,13 +905,17 @@ function openActivityModal(activityId){
   var others = activitiesOf(STATE.currentProjectId).filter(function(a){return a.ActivityID!==activityId;});
   var preds = act.Predecessors||[];
   var body = '<h3>'+escapeHtml(act.Agency)+' &mdash; '+escapeHtml(sp?sp.Name:'')+'</h3>'+
-    '<div class="field"><label>Status</label><select id="act-status">'+
-      ['Not Started','In Progress','Done','Delayed'].map(function(s){return '<option value="'+s+'" '+(act.Status===s?'selected':'')+'>'+s+'</option>';}).join('')+
-    '</select></div>'+
     '<div class="field-row">'+
-      '<div class="field"><label>Start Date</label><input type="date" id="act-start" value="'+act.StartDate+'"></div>'+
-      '<div class="field"><label>End Date</label><input type="date" id="act-end" value="'+act.EndDate+'"></div>'+
+      '<div class="field"><label>Status</label><select id="act-status">'+
+        ['Not Started','In Progress','Done','Delayed'].map(function(s){return '<option value="'+s+'" '+(act.Status===s?'selected':'')+'>'+s+'</option>';}).join('')+
+      '</select></div>'+
+      '<div class="field"><label>% Complete</label><input type="number" id="act-percent" min="0" max="100" value="'+(act.PercentComplete||0)+'"></div>'+
     '</div>'+
+    '<div class="field-row">'+
+      '<div class="field"><label>Start Date</label><input type="date" id="act-start" value="'+act.StartDate+'" onchange="syncActDuration()"></div>'+
+      '<div class="field"><label>Duration (days)</label><input type="number" id="act-duration" min="1" value="'+dayDiff(act.StartDate,act.EndDate)+'" oninput="syncActEndFromDuration()"></div>'+
+    '</div>'+
+    '<div class="field"><label>End Date</label><input type="date" id="act-end" value="'+act.EndDate+'" onchange="syncActDuration()"></div>'+
     '<div class="field"><label>Notes</label><textarea id="act-notes">'+escapeHtml(act.Notes||'')+'</textarea></div>'+
     '<div class="field"><label>Depends on (must finish before this can start)</label>'+
     (others.length ? others.map(function(o){
@@ -904,13 +929,26 @@ function openActivityModal(activityId){
     '<button class="btn primary" onclick="saveActivity(\''+activityId+'\')">Save</button></div>';
   showModal(body);
 }
+function syncActEndFromDuration(){
+  var start = document.getElementById('act-start').value;
+  var duration = Math.max(1, Number(document.getElementById('act-duration').value)||1);
+  if(!start) return;
+  document.getElementById('act-end').value = addDaysISO(start, duration);
+}
+function syncActDuration(){
+  var start = document.getElementById('act-start').value;
+  var end = document.getElementById('act-end').value;
+  if(!start || !end) return;
+  document.getElementById('act-duration').value = Math.max(1, dayDiff(start, end));
+}
 function saveActivity(activityId){
   var payload = {
     activityId: activityId,
     status: document.getElementById('act-status').value,
     startDate: document.getElementById('act-start').value,
     endDate: document.getElementById('act-end').value,
-    notes: document.getElementById('act-notes').value
+    notes: document.getElementById('act-notes').value,
+    percentComplete: Number(document.getElementById('act-percent').value)||0
   };
   var deps = Array.from(document.querySelectorAll('.act-dep-cb:checked')).map(function(cb){return cb.value;});
   apiPost('updateActivity', payload).then(function(){
@@ -1012,12 +1050,12 @@ function renderDailyView(){
   var formHtml = '<div class="card no-print" style="margin-bottom:18px;max-width:560px;">'+
     '<h3>Log Today\'s Update</h3>'+
     '<div class="field-row">'+
-      '<div class="field"><label>Date</label><input type="date" id="dl-date" value="'+todayISO()+'"></div>'+
-      '<div class="field"><label>Space</label><select id="dl-space"><option value="">General</option>'+
+      '<div class="field"><label>Date</label><input type="date" id="dl-date" value="'+todayISO()+'" onchange="renderDailyActivityRows()"></div>'+
+      '<div class="field"><label>Space</label><select id="dl-space" onchange="renderDailyActivityRows()"><option value="">General</option>'+
         spaces.map(function(s){return '<option value="'+s.SpaceID+'">'+escapeHtml(s.Name)+'</option>';}).join('')+
       '</select></div>'+
     '</div>'+
-    '<div class="field"><label>What got done today / blockers</label><textarea id="dl-entry" placeholder="e.g. Flooring grouting completed in living area, kitchen tile delivery delayed..."></textarea></div>'+
+    '<div id="dl-activity-rows"></div>'+
     '<div class="field-row">'+
       '<div class="field"><label>Logged by</label><input type="text" id="dl-by" value="'+escapeHtml(STATE.loggedByName)+'" placeholder="Your name"></div>'+
       '<div class="field" style="display:flex;align-items:flex-end;"><label style="display:flex;align-items:center;gap:7px;margin:0;">'+
@@ -1038,34 +1076,121 @@ function renderDailyView(){
   feedHtml += '</div>';
   return formHtml + feedHtml;
 }
-function attachDailyHandlers(){}
+function attachDailyHandlers(){ renderDailyActivityRows(); }
+function activitiesActiveOn(spaceId, date){
+  return activitiesOf(STATE.currentProjectId).filter(function(a){
+    return a.SpaceID===spaceId && a.Status!=='Done' && a.StartDate<=date;
+  });
+}
+function renderDailyActivityRows(){
+  var container = document.getElementById('dl-activity-rows');
+  if(!container) return;
+  var spaceId = document.getElementById('dl-space').value;
+  var date = document.getElementById('dl-date').value || todayISO();
+  var acts = spaceId ? activitiesActiveOn(spaceId, date) : [];
+
+  if(!acts.length){
+    container.innerHTML = '<div class="field"><label>What got done today / blockers</label>'+
+      '<textarea id="dl-entry" placeholder="'+(spaceId ? 'No scheduled activities for this date — describe what happened...' : 'e.g. Flooring grouting completed in living area, kitchen tile delivery delayed...')+'"></textarea></div>';
+    return;
+  }
+
+  var html = '<div class="field-hint" style="margin-bottom:8px;">Activities scheduled for this space as of '+fmtDate(date)+' &mdash; update each:</div>';
+  acts.forEach(function(a){
+    html += '<div class="card" style="padding:10px 12px;margin-bottom:8px;">'+
+      '<div style="font-weight:700;font-size:13px;margin-bottom:6px;">'+escapeHtml(a.Agency)+'</div>'+
+      '<div class="field-row">'+
+        '<div class="field" style="margin-bottom:6px;"><label>Status</label><select class="dl-act-status" data-activity-id="'+a.ActivityID+'">'+
+          ['Not Started','In Progress','Done','Delayed'].map(function(s){
+            var label = s==='In Progress' ? 'Ongoing' : s;
+            return '<option value="'+s+'" '+(a.Status===s?'selected':'')+'>'+label+'</option>';
+          }).join('')+
+        '</select></div>'+
+        '<div class="field" style="margin-bottom:6px;"><label>% Complete</label><input type="number" class="dl-act-percent" data-activity-id="'+a.ActivityID+'" min="0" max="100" value="'+(a.PercentComplete||0)+'"></div>'+
+      '</div>'+
+      '<div class="field" style="margin-bottom:0;"><label>Expected End Date</label><input type="date" class="dl-act-end" data-activity-id="'+a.ActivityID+'" value="'+a.EndDate+'"></div>'+
+      '</div>';
+  });
+  html += '<div class="field"><label>Additional notes (optional)</label><textarea id="dl-notes" placeholder="Anything else worth flagging..."></textarea></div>';
+  container.innerHTML = html;
+}
 function submitDailyLog(){
-  var entry = document.getElementById('dl-entry').value.trim();
   var by = document.getElementById('dl-by').value.trim();
-  if(!entry){ toast('Please add what got done today'); return; }
   if(!by){ toast('Please add your name'); return; }
   localStorage.setItem('pmc_logged_by', by);
   STATE.loggedByName = by;
-  var payload = {
-    date: document.getElementById('dl-date').value || todayISO(),
-    projectId: STATE.currentProjectId,
-    spaceId: document.getElementById('dl-space').value,
-    entry: entry,
-    loggedBy: by,
-    hasBlocker: document.getElementById('dl-blocker').checked
-  };
+  var date = document.getElementById('dl-date').value || todayISO();
+  var spaceId = document.getElementById('dl-space').value;
+  var hasBlocker = document.getElementById('dl-blocker').checked;
+  var statusEls = document.querySelectorAll('.dl-act-status');
+
+  if(statusEls.length){
+    var updates = Array.from(statusEls).map(function(sel){
+      var id = sel.dataset.activityId;
+      var percentEl = document.querySelector('.dl-act-percent[data-activity-id="'+id+'"]');
+      var endEl = document.querySelector('.dl-act-end[data-activity-id="'+id+'"]');
+      return { activityId: id, status: sel.value, endDate: endEl.value, percentComplete: Number(percentEl.value)||0 };
+    });
+    var notesEl = document.getElementById('dl-notes');
+    apiPost('submitActivityUpdates', {
+      date: date, projectId: STATE.currentProjectId, spaceId: spaceId, loggedBy: by,
+      hasBlocker: hasBlocker, notes: notesEl?notesEl.value.trim():'', updates: updates
+    }).then(function(){
+      toast('Logged'); refresh();
+    }).catch(showErr);
+    return;
+  }
+
+  var entryEl = document.getElementById('dl-entry');
+  var entry = entryEl ? entryEl.value.trim() : '';
+  if(!entry){ toast('Please add what got done today'); return; }
+  var payload = { date: date, projectId: STATE.currentProjectId, spaceId: spaceId, entry: entry, loggedBy: by, hasBlocker: hasBlocker };
   apiPost('addDailyLog', payload).then(function(){
     toast('Logged'); refresh();
   }).catch(showErr);
 }
 
 // ============================= PROGRESS REPORT =============================
+function plannedVsActual(pid){
+  var p = STATE.data.projects.filter(function(x){return x.ProjectID===pid;})[0];
+  var acts = activitiesOf(pid);
+  var planned = p.TargetMoveIn;
+  var projected = acts.length ? acts.map(function(a){return a.EndDate;}).sort().slice(-1)[0] : planned;
+  var delta = (planned && projected) ? dayDiff(planned, projected) : 0; // >0 = projected finish is later than planned
+  return { planned: planned, projected: projected, delta: delta };
+}
+function pendingProcurement(pid){
+  var out = [];
+  boqItemsOf(pid).forEach(function(r){
+    var order = r.Stages.filter(function(s){return s.stage==='Order Placement';})[0];
+    var delivery = r.Stages.filter(function(s){return s.stage==='Delivery';})[0];
+    var sp = STATE.data.spaces.filter(function(s){return s.SpaceID===r.SpaceID;})[0];
+    if(order && order.status!=='Done' && order.status!=='N/A'){
+      out.push({space: sp?sp.Name:'', material: r.MaterialName, stage:'Order Placement', status: order.status});
+    } else if(delivery && delivery.status!=='Done' && delivery.status!=='N/A'){
+      out.push({space: sp?sp.Name:'', material: r.MaterialName, stage:'Delivery', status: delivery.status});
+    }
+  });
+  return out;
+}
+function delayedAgencies(pid){
+  var today = todayISO();
+  return activitiesOf(pid).filter(function(a){
+    return a.Status==='Delayed' || (a.EndDate < today && a.Status!=='Done');
+  }).map(function(a){
+    var sp = STATE.data.spaces.filter(function(s){return s.SpaceID===a.SpaceID;})[0];
+    return { agency: a.Agency, space: sp?sp.Name:'', overdueDays: a.EndDate<today ? dayDiff(a.EndDate, today) : 0, status: a.Status };
+  });
+}
 function renderReportView(){
   var pid = STATE.currentProjectId;
   var p = STATE.data.projects.filter(function(x){return x.ProjectID===pid;})[0];
   var pct = projectPct(pid);
   var cash = projectCashSummary(pid);
   var delayed = delayedItems(pid);
+  var pva = plannedVsActual(pid);
+  var procurement = pendingProcurement(pid);
+  var agencies = delayedAgencies(pid);
   var weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate()-7);
   var completions = [];
   boqItemsOf(pid).forEach(function(r){
@@ -1083,14 +1208,37 @@ function renderReportView(){
     '<h2>'+escapeHtml(p.Name)+' &mdash; Progress Report</h2>'+
     '<div class="report-sub">'+escapeHtml(p.Address||'')+' &middot; Generated '+fmtDate(todayISO())+'</div>';
 
-  html += '<div class="stat-strip"><div class="stat-box"><div class="label">Overall Complete</div><div class="value accent">'+pct+'%</div></div>'+
-    '<div class="stat-box"><div class="label">Outstanding Payments</div><div class="value">'+fmtMoney(cash.outstanding)+'</div></div>'+
-    '<div class="stat-box"><div class="label">Delayed Items</div><div class="value '+(delayed.length?'red':'')+'">'+delayed.length+'</div></div></div>';
+  html += '<div style="display:flex;align-items:center;gap:24px;flex-wrap:wrap;margin-bottom:18px;">'+
+    '<div class="progress-ring" style="--pct:'+pct+';"><div class="ring-label">'+pct+'%</div></div>'+
+    '<div style="flex:1;min-width:220px;">'+
+      '<div class="label" style="font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--ink-soft);font-weight:700;">Planned vs. Projected Finish</div>'+
+      '<div style="font-size:15px;margin-top:4px;">Planned: <b>'+fmtDate(pva.planned)+'</b> &nbsp;&middot;&nbsp; Projected: <b>'+fmtDate(pva.projected)+'</b></div>'+
+      '<div style="margin-top:4px;">'+(pva.delta>0 ?
+        '<span class="badge warn">'+pva.delta+' day'+(pva.delta===1?'':'s')+' behind schedule</span>' :
+        pva.delta<0 ? '<span class="badge ok">'+Math.abs(pva.delta)+' day'+(Math.abs(pva.delta)===1?'':'s')+' ahead of schedule</span>' :
+        '<span class="badge ok">On schedule</span>')+
+      '</div>'+
+    '</div></div>';
+
+  html += '<div class="stat-strip"><div class="stat-box"><div class="label">Outstanding Payments</div><div class="value">'+fmtMoney(cash.outstanding)+'</div></div>'+
+    '<div class="stat-box"><div class="label">Delayed Items</div><div class="value '+(delayed.length?'red':'')+'">'+delayed.length+'</div></div>'+
+    '<div class="stat-box"><div class="label">Pending Procurement</div><div class="value '+(procurement.length?'accent':'')+'">'+procurement.length+'</div></div>'+
+    '<div class="stat-box"><div class="label">Agencies Running Late</div><div class="value '+(agencies.length?'red':'')+'">'+agencies.length+'</div></div></div>';
 
   html += '<div class="section-title">This Week\'s Completions</div>';
   html += completions.length ? '<ul class="plain">'+completions.map(function(c){return '<li>'+c+'</li>';}).join('')+'</ul>' : '<p style="color:var(--ink-soft);font-size:13px;">No stage completions logged in the last 7 days.</p>';
 
-  html += '<div class="section-title">Delayed Items</div>';
+  html += '<div class="section-title">Agencies Running Delayed</div>';
+  html += agencies.length ? '<ul class="plain">'+agencies.map(function(a){
+      return '<li>'+escapeHtml(a.agency)+' &mdash; '+escapeHtml(a.space)+(a.overdueDays>0?' &mdash; '+a.overdueDays+' day'+(a.overdueDays===1?'':'s')+' overdue':' &mdash; marked delayed')+'</li>';
+    }).join('')+'</ul>' : '<p style="color:var(--ink-soft);font-size:13px;">None &mdash; every trade is on schedule.</p>';
+
+  html += '<div class="section-title">Pending Procurement</div>';
+  html += procurement.length ? '<ul class="plain">'+procurement.map(function(pr){
+      return '<li>'+escapeHtml(pr.space)+' &mdash; '+escapeHtml(pr.material)+' &mdash; '+escapeHtml(pr.stage)+' ('+escapeHtml(pr.status)+')</li>';
+    }).join('')+'</ul>' : '<p style="color:var(--ink-soft);font-size:13px;">Nothing pending &mdash; all materials ordered/delivered.</p>';
+
+  html += '<div class="section-title">Delayed Items (Stage-level)</div>';
   html += delayed.length ? '<ul class="plain">'+delayed.map(function(d){
       var sp = d.space;
       return '<li>'+escapeHtml(sp)+' &mdash; '+escapeHtml(d.material)+' ('+escapeHtml(d.stage)+') &mdash; '+ (d.overdue&&d.status!=='Delayed'?'overdue, target was '+fmtDate(d.target):'marked delayed')+'</li>';
@@ -1276,6 +1424,11 @@ function renderClientView(){
       '</div>';
   });
   html += '</div>';
+
+  if(activitiesOf(pid).length){
+    html += '<div class="section-title">Project Timeline</div>'+
+      renderScheduleChart(pid, { readOnly: true, gridId: 'schedGridClient', svgId: 'schedSvgClient' });
+  }
   return html;
 }
 

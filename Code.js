@@ -304,10 +304,10 @@ var TABS = {
       'PaymentStatus', 'StagesJSON', 'RollupStatus', 'Notes', 'CreatedAt', 'UpdatedAt'
     ]
   },
-  DAILY_LOG: { name: 'DAILY_LOG', headers: ['LogID', 'Date', 'ProjectID', 'SpaceID', 'Entry', 'LoggedBy', 'HasBlocker', 'CreatedAt'] },
+  DAILY_LOG: { name: 'DAILY_LOG', headers: ['LogID', 'Date', 'ProjectID', 'SpaceID', 'Entry', 'LoggedBy', 'HasBlocker', 'CreatedAt', 'UpdatesJSON'] },
   SCHEDULE_ACTIVITIES: {
     name: 'SCHEDULE_ACTIVITIES',
-    headers: ['ActivityID', 'ProjectID', 'SpaceID', 'Agency', 'StartDate', 'EndDate', 'Status', 'PredecessorsJSON', 'Notes', 'CreatedAt', 'UpdatedAt']
+    headers: ['ActivityID', 'ProjectID', 'SpaceID', 'Agency', 'StartDate', 'EndDate', 'Status', 'PredecessorsJSON', 'Notes', 'CreatedAt', 'UpdatedAt', 'PercentComplete']
   }
 };
 
@@ -323,6 +323,23 @@ function getSS_() {
   return SpreadsheetApp.openById(id);
 }
 
+// Appends a missing header column (and backfills a default for existing rows)
+// without disturbing any existing column's position — self-healing so minor
+// schema additions never need a one-time manual migration step.
+function ensureColumn_(sheet, headerName, defaultValue) {
+  var lastCol = sheet.getLastColumn();
+  var headers = lastCol ? sheet.getRange(1, 1, 1, lastCol).getValues()[0] : [];
+  if (headers.indexOf(headerName) > -1) return;
+  var col = lastCol + 1;
+  sheet.getRange(1, col).setValue(headerName);
+  var lastRow = sheet.getLastRow();
+  if (lastRow > 1) {
+    var vals = [];
+    for (var i = 0; i < lastRow - 1; i++) vals.push([defaultValue]);
+    sheet.getRange(2, col, vals.length, 1).setValues(vals);
+  }
+}
+
 function getTab_(ss, key) {
   var t = TABS[key];
   var sh = ss.getSheetByName(t.name);
@@ -330,6 +347,10 @@ function getTab_(ss, key) {
     sh = ss.insertSheet(t.name);
     sh.appendRow(t.headers);
     sh.setFrozenRows(1);
+  } else if (key === 'SCHEDULE_ACTIVITIES') {
+    ensureColumn_(sh, 'PercentComplete', 0);
+  } else if (key === 'DAILY_LOG') {
+    ensureColumn_(sh, 'UpdatesJSON', '[]');
   }
   return sh;
 }
@@ -526,8 +547,9 @@ function seedDemoProject_(ss) {
     if (g.statuses.every(function (s) { return s === 'Done'; })) status = 'Done';
     else if (g.statuses.indexOf('Delayed') > -1) status = 'Delayed';
     else if (g.statuses.some(function (s) { return s === 'In Progress' || s === 'Done'; })) status = 'In Progress';
+    var percentComplete = { 'Done': 100, 'In Progress': 55, 'Delayed': 30, 'Not Started': 0 }[status];
     var activityId = 'ACT-' + Utilities.getUuid().slice(0, 6);
-    actSheet.appendRow([activityId, projectId, g.spaceId, g.agency, startDate, endDate, status, '[]', '', now, now]);
+    actSheet.appendRow([activityId, projectId, g.spaceId, g.agency, startDate, endDate, status, '[]', '', now, now, percentComplete]);
   });
 
   var engineers = ['Deepak Soni', 'Achal Rathore'];
@@ -540,7 +562,7 @@ function seedDemoProject_(ss) {
   ];
   sampleLogs.forEach(function (l) {
     logSheet.appendRow([
-      Utilities.getUuid().slice(0, 8), daysAgoISO_(-l.d), projectId, l.sp, l.entry, l.by, l.blocker, new Date()
+      Utilities.getUuid().slice(0, 8), daysAgoISO_(-l.d), projectId, l.sp, l.entry, l.by, l.blocker, new Date(), '[]'
     ]);
   });
 }
@@ -609,7 +631,8 @@ function doPost(e) {
     addMaterial: addMaterial, updateMaterial: updateMaterial,
     addBoqItem: addBoqItem, updateBoqItem: updateBoqItem,
     updateStage: updateStage, addDailyLog: addDailyLog,
-    updateActivity: updateActivity, setActivityDependencies: setActivityDependencies
+    updateActivity: updateActivity, setActivityDependencies: setActivityDependencies,
+    submitActivityUpdates: submitActivityUpdates
   };
   var fn = routes[data.action];
   if (!fn) return respond_({ ok: false, error: 'Unknown action: ' + data.action });
@@ -792,42 +815,100 @@ function addBoqItem(payload) {
 
 function ensureActivityForBoqItem_(ss, projectId, spaceId, agency) {
   var sheet = getTab_(ss, 'SCHEDULE_ACTIVITIES');
-  var existing = rowsToObjects_(sheet).filter(function (a) {
+  var all = rowsToObjects_(sheet);
+  var existing = all.filter(function (a) {
     return a.ProjectID === projectId && a.SpaceID === spaceId && a.Agency === agency;
   })[0];
   if (existing) return existing.ActivityID;
+
+  // Chain after the most-recently-created activity already in this space, if
+  // any — rooms run one trade after another by default, not in parallel.
+  var spaceActivities = all.filter(function (a) { return a.ProjectID === projectId && a.SpaceID === spaceId; })
+    .sort(function (a, b) { return new Date(b.CreatedAt) - new Date(a.CreatedAt); });
+  var predecessor = spaceActivities[0];
+
   var activityId = 'ACT-' + Utilities.getUuid().slice(0, 6);
   var now = new Date();
+  // normDate_ first: a date read back via rowsToObjects_ may be a raw Sheets
+  // Date object (internally IST-midnight-based, since the spreadsheet's
+  // timeZone is Asia/Kolkata) rather than a plain string — arithmetic on the
+  // unnormalized value silently lands a day off.
+  var startDate = predecessor ? normDate_(predecessor.EndDate) : daysFromNowISO_(0);
+  var endDate = addDaysISO_(startDate, 7);
+  var predecessors = predecessor ? [predecessor.ActivityID] : [];
   sheet.appendRow([
-    activityId, projectId, spaceId, agency, daysFromNowISO_(0), daysFromNowISO_(7),
-    'Not Started', '[]', '', now, now
+    activityId, projectId, spaceId, agency, startDate, endDate,
+    'Not Started', JSON.stringify(predecessors), '', now, now, 0
   ]);
   return activityId;
 }
 
-function updateActivity(payload) {
-  // payload: { activityId, startDate?, endDate?, status?, notes? }
-  var ss = getSS_();
+function addDaysISO_(iso, n) {
+  var normalized = normDate_(iso) || iso;
+  var d = new Date(normalized);
+  d.setUTCDate(d.getUTCDate() + n);
+  return Utilities.formatDate(d, 'UTC', 'yyyy-MM-dd');
+}
+
+// Shared write path for a single activity's status/dates/notes/%, used by both
+// updateActivity (one activity at a time) and submitActivityUpdates (a batch
+// from the daily-log form) — keeps the Done-flip and cascade logic in one place.
+function applyActivityChange_(ss, activityId, changes) {
   var sheet = getTab_(ss, 'SCHEDULE_ACTIVITIES');
-  var row = findRowById_(sheet, 'ActivityID', payload.activityId);
-  if (row < 0) throw new Error('Activity not found');
+  var row = findRowById_(sheet, 'ActivityID', activityId);
+  if (row < 0) throw new Error('Activity not found: ' + activityId);
   var headers = sheet.getDataRange().getValues()[0];
   var idx = {};
   headers.forEach(function (h, i) { idx[h] = i; });
   var current = sheet.getRange(row, 1, 1, headers.length).getValues()[0];
 
-  if (payload.startDate !== undefined) current[idx.StartDate] = payload.startDate;
-  if (payload.endDate !== undefined) current[idx.EndDate] = payload.endDate;
-  if (payload.status !== undefined) current[idx.Status] = payload.status;
-  if (payload.notes !== undefined) current[idx.Notes] = payload.notes;
+  if (changes.startDate !== undefined) current[idx.StartDate] = changes.startDate;
+  if (changes.endDate !== undefined) current[idx.EndDate] = changes.endDate;
+  if (changes.status !== undefined) current[idx.Status] = changes.status;
+  if (changes.notes !== undefined) current[idx.Notes] = changes.notes;
+  if (changes.percentComplete !== undefined) current[idx.PercentComplete] = Number(changes.percentComplete);
   current[idx.UpdatedAt] = new Date();
   sheet.getRange(row, 1, 1, headers.length).setValues([current]);
 
-  if (payload.status === 'Done') {
+  if (changes.status === 'Done') {
     markInstallationDone_(ss, current[idx.ProjectID], current[idx.SpaceID], current[idx.Agency], current[idx.EndDate]);
+    sheet.getRange(row, idx.PercentComplete + 1).setValue(100);
   }
-  cascadeFromActivity_(ss, payload.activityId);
+  cascadeFromActivity_(ss, activityId);
+}
+
+function updateActivity(payload) {
+  // payload: { activityId, startDate?, endDate?, status?, notes? }
+  var ss = getSS_();
+  applyActivityChange_(ss, payload.activityId, payload);
   return { ok: true };
+}
+
+function submitActivityUpdates(payload) {
+  // payload: { date, projectId, spaceId, loggedBy, hasBlocker, notes, updates: [{activityId, status, endDate, percentComplete}] }
+  var ss = getSS_();
+  var summaryParts = [];
+  (payload.updates || []).forEach(function (u) {
+    applyActivityChange_(ss, u.activityId, { status: u.status, endDate: u.endDate, percentComplete: u.percentComplete });
+    var actRow = rowsToObjects_(getTab_(ss, 'SCHEDULE_ACTIVITIES')).filter(function (a) { return a.ActivityID === u.activityId; })[0];
+    summaryParts.push((actRow ? actRow.Agency : u.activityId) + ': ' + u.status + ' (' + u.percentComplete + '%)');
+  });
+  var entry = summaryParts.join('; ') + (payload.notes ? ' — ' + payload.notes : '');
+
+  var logSheet = getTab_(ss, 'DAILY_LOG');
+  var logId = 'LOG-' + Utilities.getUuid().slice(0, 8);
+  logSheet.appendRow([
+    logId, payload.date, payload.projectId, payload.spaceId || '',
+    entry, payload.loggedBy, !!payload.hasBlocker, new Date(), JSON.stringify(payload.updates || [])
+  ]);
+
+  var proj = projectName_(payload.projectId);
+  var space = spaceName_(payload.spaceId);
+  var subject = (payload.hasBlocker ? '⚠️ BLOCKER — ' : 'Daily log — ') + proj + ' (' + space + ')';
+  var body = payload.loggedBy + ' logged an update on ' + payload.date + ':\n\n' + entry + '\n\n' + APP_URL;
+  notify_(subject, body);
+
+  return { logId: logId };
 }
 
 function setActivityDependencies(payload) {
@@ -902,11 +983,12 @@ function cascadeFromActivity_(ss, activityId, visited) {
     var preds = JSON.parse(successor.PredecessorsJSON || '[]');
     if (preds.indexOf(activityId) === -1) return;
     var succStart = normDate_(successor.StartDate) || successor.StartDate;
+    var succEnd = normDate_(successor.EndDate) || successor.EndDate;
     if (succStart >= predEnd) return; // already satisfied
 
     var deltaMs = new Date(predEnd) - new Date(succStart);
-    var newStart = shiftDateISO_(successor.StartDate, deltaMs);
-    var newEnd = shiftDateISO_(successor.EndDate, deltaMs);
+    var newStart = shiftDateISO_(succStart, deltaMs);
+    var newEnd = shiftDateISO_(succEnd, deltaMs);
 
     var current = sheet.getRange(successor._row, 1, 1, headers.length).getValues()[0];
     current[idx.StartDate] = newStart;
@@ -986,7 +1068,7 @@ function addDailyLog(payload) {
   var logId = 'LOG-' + Utilities.getUuid().slice(0, 8);
   sheet.appendRow([
     logId, payload.date, payload.projectId, payload.spaceId || '',
-    payload.entry, payload.loggedBy, !!payload.hasBlocker, new Date()
+    payload.entry, payload.loggedBy, !!payload.hasBlocker, new Date(), '[]'
   ]);
 
   var proj = projectName_(payload.projectId);
