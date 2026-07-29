@@ -356,20 +356,31 @@ function boqItemsOf(projectId, spaceId){
 function logsOf(projectId){
   return STATE.data.dailyLog.filter(function(l){return l.ProjectID===projectId;});
 }
-function projectPct(projectId){
-  var rows = boqItemsOf(projectId);
-  if(!rows.length) return 0;
+// Overall % is an equal-weighted blend of the three tracked phases (Design,
+// Material Selection, Execution) — a phase with no data yet (e.g. no
+// activities created) is excluded from the blend rather than counted as 0%.
+function stagePct_(rows, stagesKey){
   var total=0, done=0;
-  rows.forEach(function(r){
-    r.Stages.forEach(function(s){ total++; if(s.status==='Done'||s.status==='N/A') done++; });
-  });
-  return total ? Math.round(done/total*100) : 0;
+  rows.forEach(function(r){ (r[stagesKey]||[]).forEach(function(s){ total++; if(s.status==='Done'||s.status==='N/A') done++; }); });
+  return total ? done/total*100 : null;
+}
+function blendPct_(spaces, boqRows, actRows){
+  var designPct = stagePct_(spaces, 'Design');
+  var materialPct = stagePct_(boqRows, 'Stages');
+  var execPct = null;
+  if(actRows.length){
+    execPct = actRows.reduce(function(a,r){return a+(Number(r.PercentComplete)||0);},0) / actRows.length;
+  }
+  var parts = [designPct, materialPct, execPct].filter(function(p){return p!==null;});
+  return parts.length ? Math.round(parts.reduce(function(a,b){return a+b;},0)/parts.length) : 0;
+}
+function projectPct(projectId){
+  return blendPct_(spacesOf(projectId), boqItemsOf(projectId), activitiesOf(projectId));
 }
 function spacePct(projectId, spaceId){
-  var rows = boqItemsOf(projectId, spaceId);
-  var total=0, done=0;
-  rows.forEach(function(r){ r.Stages.forEach(function(s){ total++; if(s.status==='Done'||s.status==='N/A') done++; }); });
-  return total? Math.round(done/total*100) : 0;
+  var spaces = spacesOf(projectId).filter(function(s){return s.SpaceID===spaceId;});
+  var actRows = activitiesOf(projectId).filter(function(a){return a.SpaceID===spaceId;});
+  return blendPct_(spaces, boqItemsOf(projectId, spaceId), actRows);
 }
 function isOverdue(stage){
   if(!stage.target) return false;
@@ -595,6 +606,53 @@ function categoryChipRow(pid, spaceId){
   return html + '</div>';
 }
 
+// ============================= DESIGN (per space) =============================
+function renderDesignRow(sp){
+  var design = sp.Design || [];
+  var rollup = sp.DesignRollup || 'Not Started';
+  var cells = design.map(function(d){
+    var title = d.stage+': '+d.status+(d.target? ' · target '+fmtDate(d.target):'')+(d.note? ' · '+d.note:'');
+    return '<div style="text-align:center;">'+
+      '<div class="stage-cell '+cls(d.status)+'" style="width:52px;" title="'+escapeHtml(title)+'" onclick="openDesignStageModal(\''+sp.SpaceID+'\',\''+d.stage+'\')"></div>'+
+      '<div style="font-size:10px;color:var(--ink-soft);margin-top:3px;font-weight:600;">'+escapeHtml(d.stage)+'</div>'+
+    '</div>';
+  }).join('');
+  return '<div class="design-row" style="display:flex;align-items:center;gap:14px;margin-bottom:10px;padding:8px 10px;background:#fff;border:1px solid var(--line);border-radius:var(--radius);">'+
+    '<div style="font-size:11px;text-transform:uppercase;letter-spacing:.03em;color:var(--ink-soft);font-weight:700;">Design</div>'+
+    '<div style="display:flex;gap:10px;">'+cells+'</div>'+
+    '<span class="status-chip '+cls(rollup)+'" style="margin-left:auto;">'+rollup+'</span>'+
+    '</div>';
+}
+function openDesignStageModal(spaceId, stageName){
+  var sp = STATE.data.spaces.filter(function(s){return s.SpaceID===spaceId;})[0];
+  var stage = (sp.Design||[]).filter(function(d){return d.stage===stageName;})[0];
+  var body = '<h3>'+escapeHtml(sp.Name)+' &mdash; Design: '+escapeHtml(stageName)+'</h3>'+
+    '<div class="field"><label>Status</label><select id="ds-status">'+
+      STATUS_LIST.map(function(s){return '<option value="'+s+'" '+(stage.status===s?'selected':'')+'>'+s+'</option>';}).join('')+
+    '</select></div>'+
+    '<div class="field-row">'+
+      '<div class="field"><label>Target date</label><input type="date" id="ds-target" value="'+(stage.target||'')+'"></div>'+
+      '<div class="field"><label>Actual completion</label><input type="date" id="ds-actual" value="'+(stage.actual||'')+'"></div>'+
+    '</div>'+
+    '<div class="field"><label>Note</label><textarea id="ds-note">'+escapeHtml(stage.note||'')+'</textarea></div>'+
+    (stageName==='WD' ? '<div class="field-hint">Marking WD Done unlocks execution (In Progress/Done) for every trade in this space, and auto-shifts any execution activity still scheduled to start earlier.</div>' : '')+
+    '<div class="modal-actions"><button class="btn" onclick="closeModal()">Cancel</button>'+
+    '<button class="btn primary" onclick="saveDesignStage(\''+spaceId+'\',\''+stageName+'\')">Save</button></div>';
+  showModal(body);
+}
+function saveDesignStage(spaceId, stageName){
+  var payload = {
+    spaceId: spaceId, stage: stageName,
+    status: document.getElementById('ds-status').value,
+    target: document.getElementById('ds-target').value,
+    actual: document.getElementById('ds-actual').value,
+    note: document.getElementById('ds-note').value
+  };
+  apiPost('updateDesignStage', payload).then(function(){
+    closeModal(); toast('Saved'); refresh();
+  }).catch(showErr);
+}
+
 // ============================= TRACKER / PLANNING GRID (BOQ) =============================
 function renderTrackerView(editable){
   var pid = STATE.currentProjectId;
@@ -612,8 +670,9 @@ function renderTrackerView(editable){
     });
     html += '<div class="space-block"><div class="space-head"><h3>'+escapeHtml(sp.Name)+'</h3>'+
       '<span class="badge ok">'+spacePct(pid, sp.SpaceID)+'% complete</span></div>';
+    html += renderDesignRow(sp);
     html += '<div class="table-wrap"><table class="tracker"><thead><tr><th>Material</th><th>Unit</th><th>Qty</th><th>Amount</th>';
-    schema.stages.forEach(function(st){ html += '<th style="text-align:center">'+st+'</th>'; });
+    schema.materialStages.forEach(function(st){ html += '<th style="text-align:center">'+st+'</th>'; });
     html += '</tr></thead><tbody>';
     rows.forEach(function(r){
       html += '<tr><td class="subitem-cell"><span class="cat">'+escapeHtml(r.Category)+'</span>'+escapeHtml(r.MaterialName)+
@@ -663,7 +722,7 @@ function openStageModal(boqItemId, stageName, readOnly){
       STATUS_LIST.map(function(s){return '<option value="'+s+'" '+(stage.status===s?'selected':'')+'>'+s+'</option>';}).join('')+
     '</select></div>'+
     '<div class="field-row">'+
-      '<div class="field"><label>Target date</label><input type="date" id="m-target" value="'+(stage.target||'')+'" '+(readOnly?'disabled':'')+'></div>'+
+      '<div class="field"><label>'+(stageName==='Delivery'?'Expected Delivery Date (ETD)':'Target date')+'</label><input type="date" id="m-target" value="'+(stage.target||'')+'" '+(readOnly?'disabled':'')+'></div>'+
       '<div class="field"><label>Actual completion</label><input type="date" id="m-actual" value="'+(stage.actual||'')+'" '+(readOnly?'disabled':'')+'></div>'+
     '</div>'+
     '<div class="field"><label>Note</label><textarea id="m-note" '+(readOnly?'disabled':'')+'>'+escapeHtml(stage.note||'')+'</textarea></div>'+
@@ -904,7 +963,10 @@ function openActivityModal(activityId){
   var sp = STATE.data.spaces.filter(function(s){return s.SpaceID===act.SpaceID;})[0];
   var others = activitiesOf(STATE.currentProjectId).filter(function(a){return a.ActivityID!==activityId;});
   var preds = act.Predecessors||[];
+  var wd = (sp&&sp.Design||[]).filter(function(d){return d.stage==='WD';})[0];
+  var wdBlocked = !wd || wd.status!=='Done';
   var body = '<h3>'+escapeHtml(act.Agency)+' &mdash; '+escapeHtml(sp?sp.Name:'')+'</h3>'+
+    (wdBlocked ? '<div class="field-hint" style="color:var(--delayed);margin-bottom:10px;">Design (WD) not yet delivered for this space &mdash; this activity can\'t move to In Progress/Done yet.</div>' : '')+
     '<div class="field-row">'+
       '<div class="field"><label>Status</label><select id="act-status">'+
         ['Not Started','In Progress','Done','Delayed'].map(function(s){return '<option value="'+s+'" '+(act.Status===s?'selected':'')+'>'+s+'</option>';}).join('')+
@@ -1166,9 +1228,9 @@ function pendingProcurement(pid){
     var delivery = r.Stages.filter(function(s){return s.stage==='Delivery';})[0];
     var sp = STATE.data.spaces.filter(function(s){return s.SpaceID===r.SpaceID;})[0];
     if(order && order.status!=='Done' && order.status!=='N/A'){
-      out.push({space: sp?sp.Name:'', material: r.MaterialName, stage:'Order Placement', status: order.status});
+      out.push({space: sp?sp.Name:'', material: r.MaterialName, stage:'Order Placement', status: order.status, etd: null});
     } else if(delivery && delivery.status!=='Done' && delivery.status!=='N/A'){
-      out.push({space: sp?sp.Name:'', material: r.MaterialName, stage:'Delivery', status: delivery.status});
+      out.push({space: sp?sp.Name:'', material: r.MaterialName, stage:'Delivery', status: delivery.status, etd: delivery.target});
     }
   });
   return out;
@@ -1235,7 +1297,7 @@ function renderReportView(){
 
   html += '<div class="section-title">Pending Procurement</div>';
   html += procurement.length ? '<ul class="plain">'+procurement.map(function(pr){
-      return '<li>'+escapeHtml(pr.space)+' &mdash; '+escapeHtml(pr.material)+' &mdash; '+escapeHtml(pr.stage)+' ('+escapeHtml(pr.status)+')</li>';
+      return '<li>'+escapeHtml(pr.space)+' &mdash; '+escapeHtml(pr.material)+' &mdash; '+escapeHtml(pr.stage)+' ('+escapeHtml(pr.status)+')'+(pr.etd?' &mdash; ETD '+fmtDate(pr.etd):'')+'</li>';
     }).join('')+'</ul>' : '<p style="color:var(--ink-soft);font-size:13px;">Nothing pending &mdash; all materials ordered/delivered.</p>';
 
   html += '<div class="section-title">Delayed Items (Stage-level)</div>';

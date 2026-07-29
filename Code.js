@@ -5,7 +5,12 @@
  * stored in Script Properties under PMC_SHEET_ID.
  */
 
-var STAGES = ['Design Freeze', 'BOQ', 'Selection', 'Order Placement', 'Delivery', 'Installation'];
+// Material Selection (per BOQ line) and Design (per space) are tracked as two
+// separate stage lists — see the Phase 4 restructure. STAGES kept as an alias
+// of MATERIAL_STAGES for any stray reference; prefer the named constants.
+var MATERIAL_STAGES = ['BOQ', 'Selection', 'Order Placement', 'Delivery'];
+var DESIGN_STAGES = ['2D', '3D', 'WD'];
+var STAGES = MATERIAL_STAGES;
 
 // Execution trades — mirrors the user's real "Legends" tab (Rate List agency column).
 var AGENCIES = [
@@ -295,7 +300,7 @@ function spaceName_(spaceId) {
 
 var TABS = {
   PROJECTS: { name: 'PROJECTS', headers: ['ProjectID', 'Name', 'Address', 'StartDate', 'TargetMoveIn', 'Budget', 'ClientName', 'CreatedAt'] },
-  SPACES: { name: 'SPACES', headers: ['SpaceID', 'ProjectID', 'Name', 'SortOrder'] },
+  SPACES: { name: 'SPACES', headers: ['SpaceID', 'ProjectID', 'Name', 'SortOrder', 'DesignJSON', 'DesignRollup'] },
   MATERIALS_CONFIG: { name: 'MATERIALS_CONFIG', headers: ['MaterialID', 'Category', 'Name', 'Unit', 'Rate', 'Agency', 'Active', 'CreatedAt'] },
   BOQ_ITEMS: {
     name: 'BOQ_ITEMS', headers: [
@@ -351,6 +356,12 @@ function getTab_(ss, key) {
     ensureColumn_(sh, 'PercentComplete', 0);
   } else if (key === 'DAILY_LOG') {
     ensureColumn_(sh, 'UpdatesJSON', '[]');
+  } else if (key === 'SPACES') {
+    var defaultDesign = JSON.stringify(DESIGN_STAGES.map(function (s) {
+      return { stage: s, status: 'Not Started', target: '', actual: '', note: '' };
+    }));
+    ensureColumn_(sh, 'DesignJSON', defaultDesign);
+    ensureColumn_(sh, 'DesignRollup', 'Not Started');
   }
   return sh;
 }
@@ -442,22 +453,25 @@ function setup() {
 // One-time: run this from the Apps Script editor to move an existing sheet from
 // the old fixed-subitem TRACKER/CASHFLOW model to the BOQ_ITEMS model. Safe to
 // run more than once (idempotent) — it always leaves a fresh demo project.
+// clearContent() on the data range, not deleteRows — deleteRows can throw
+// "not possible to delete all non-frozen rows" when the deleted range covers
+// every remaining row below a frozen header (an intermittent Sheets API
+// restriction), which clearContent never hits since row count is unchanged.
+function clearDataRows_(sheet) {
+  var lastRow = sheet.getLastRow();
+  if (lastRow <= 1) return;
+  sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn()).clearContent();
+}
+
 function migrateToBoq() {
   var ss = getSS_();
   ['TRACKER', 'CASHFLOW'].forEach(function (name) {
     var sh = ss.getSheetByName(name);
     if (sh) ss.deleteSheet(sh);
   });
-  ['PROJECTS', 'SPACES', 'DAILY_LOG'].forEach(function (key) {
-    var sh = getTab_(ss, key);
-    if (sh.getLastRow() > 1) sh.deleteRows(2, sh.getLastRow() - 1);
+  ['PROJECTS', 'SPACES', 'DAILY_LOG', 'MATERIALS_CONFIG', 'BOQ_ITEMS', 'SCHEDULE_ACTIVITIES'].forEach(function (key) {
+    clearDataRows_(getTab_(ss, key));
   });
-  var matSheet = getTab_(ss, 'MATERIALS_CONFIG');
-  if (matSheet.getLastRow() > 1) matSheet.deleteRows(2, matSheet.getLastRow() - 1);
-  var boqSheet = getTab_(ss, 'BOQ_ITEMS');
-  if (boqSheet.getLastRow() > 1) boqSheet.deleteRows(2, boqSheet.getLastRow() - 1);
-  var actSheet = getTab_(ss, 'SCHEDULE_ACTIVITIES');
-  if (actSheet.getLastRow() > 1) actSheet.deleteRows(2, actSheet.getLastRow() - 1);
 
   seedMaterialsIfEmpty_(ss);
   seedDemoProject_(ss);
@@ -495,10 +509,16 @@ function seedDemoProject_(ss) {
 
   var spaceNames = ['Entrance Foyer', 'Drawing Room'];
   var spaceIds = {};
+  // Both spaces' design is fully delivered in the demo — the "behind schedule"
+  // story lives in procurement/execution, not design, so execution activities
+  // (some In Progress/Delayed) stay valid under the WD-gates-execution rule.
+  var designDone = JSON.stringify(DESIGN_STAGES.map(function (s, i) {
+    return { stage: s, status: 'Done', target: daysAgoISO_(90 - i * 10), actual: daysAgoISO_(85 - i * 10), note: '' };
+  }));
   spaceNames.forEach(function (name, idx) {
     var spaceId = 'S-' + String(idx + 1).padStart(3, '0');
     spaceIds[name] = spaceId;
-    spaceSheet.appendRow([spaceId, projectId, name, idx + 1]);
+    spaceSheet.appendRow([spaceId, projectId, name, idx + 1, designDone, 'Done']);
   });
 
   var counters = {};
@@ -523,12 +543,12 @@ function seedDemoProject_(ss) {
     ]);
 
     var groupKey = spaceId + '|' + item.agency;
-    var install = stages.filter(function (s) { return s.stage === 'Installation'; })[0];
-    var designFreeze = stages.filter(function (s) { return s.stage === 'Design Freeze'; })[0];
+    var delivery = stages.filter(function (s) { return s.stage === 'Delivery'; })[0];
+    var boqStage = stages.filter(function (s) { return s.stage === 'BOQ'; })[0];
     groups[groupKey] = groups[groupKey] || { spaceId: spaceId, agency: item.agency, installTargets: [], statuses: [], startTargets: [] };
-    groups[groupKey].installTargets.push(install.target);
-    groups[groupKey].startTargets.push(designFreeze.target);
-    groups[groupKey].statuses.push(install.status);
+    groups[groupKey].installTargets.push(addDaysISO_(delivery.target, 14));
+    groups[groupKey].startTargets.push(boqStage.target);
+    groups[groupKey].statuses.push(delivery.status);
   });
 
   var actSheet = getTab_(ss, 'SCHEDULE_ACTIVITIES');
@@ -569,23 +589,24 @@ function seedDemoProject_(ss) {
 
 function buildDemoStages_(mode, idx) {
   // Produce a realistic mixed spread of statuses across the 6 stages.
+  // 4 stages: BOQ, Selection, Order Placement, Delivery.
   var pattern;
   if (mode === 'ahead') {
     var patterns = [
-      ['Done', 'Done', 'Done', 'Done', 'Done', 'Done'],
-      ['Done', 'Done', 'Done', 'Done', 'Done', 'In Progress'],
-      ['Done', 'Done', 'Done', 'Done', 'In Progress', 'Not Started'],
-      ['Done', 'Done', 'Done', 'In Progress', 'Not Started', 'Not Started'],
-      ['Done', 'Done', 'Delayed', 'Not Started', 'Not Started', 'Not Started']
+      ['Done', 'Done', 'Done', 'Done'],
+      ['Done', 'Done', 'Done', 'In Progress'],
+      ['Done', 'Done', 'In Progress', 'Not Started'],
+      ['Done', 'Done', 'Delayed', 'Not Started'],
+      ['Done', 'In Progress', 'Not Started', 'Not Started']
     ];
     pattern = patterns[idx % patterns.length];
   } else {
     var patterns2 = [
-      ['Done', 'Done', 'In Progress', 'Not Started', 'Not Started', 'Not Started'],
-      ['Done', 'Delayed', 'Not Started', 'Not Started', 'Not Started', 'Not Started'],
-      ['Done', 'Done', 'Done', 'In Progress', 'Not Started', 'Not Started'],
-      ['Done', 'In Progress', 'Not Started', 'Not Started', 'Not Started', 'Not Started'],
-      ['Not Started', 'Not Started', 'Not Started', 'Not Started', 'Not Started', 'Not Started']
+      ['Done', 'In Progress', 'Not Started', 'Not Started'],
+      ['Done', 'Delayed', 'Not Started', 'Not Started'],
+      ['Done', 'Done', 'In Progress', 'Not Started'],
+      ['In Progress', 'Not Started', 'Not Started', 'Not Started'],
+      ['Not Started', 'Not Started', 'Not Started', 'Not Started']
     ];
     pattern = patterns2[idx % patterns2.length];
   }
@@ -630,7 +651,7 @@ function doPost(e) {
     addProject: addProject, updateProject: updateProject, addSpace: addSpace,
     addMaterial: addMaterial, updateMaterial: updateMaterial,
     addBoqItem: addBoqItem, updateBoqItem: updateBoqItem,
-    updateStage: updateStage, addDailyLog: addDailyLog,
+    updateStage: updateStage, updateDesignStage: updateDesignStage, addDailyLog: addDailyLog,
     updateActivity: updateActivity, setActivityDependencies: setActivityDependencies,
     submitActivityUpdates: submitActivityUpdates
   };
@@ -642,7 +663,7 @@ function doPost(e) {
 // ---------- Client-callable API ----------
 
 function getSchema() {
-  return { stages: STAGES, agencies: AGENCIES, defaultSplit: DEFAULT_SPLIT };
+  return { materialStages: MATERIAL_STAGES, designStages: DESIGN_STAGES, agencies: AGENCIES, defaultSplit: DEFAULT_SPLIT };
 }
 
 function normDate_(v) {
@@ -657,7 +678,14 @@ function getAllData() {
     r.TargetMoveIn = normDate_(r.TargetMoveIn);
     return r;
   });
-  var spaces = rowsToObjects_(getTab_(ss, 'SPACES'));
+  var spaces = rowsToObjects_(getTab_(ss, 'SPACES')).map(function (r) {
+    r.Design = JSON.parse(r.DesignJSON || '[]').map(function (s) {
+      s.target = normDate_(s.target);
+      s.actual = normDate_(s.actual);
+      return s;
+    });
+    return r;
+  });
   var materialsConfig = rowsToObjects_(getTab_(ss, 'MATERIALS_CONFIG'));
   var boqItems = rowsToObjects_(getTab_(ss, 'BOQ_ITEMS')).map(function (r) {
     r.Stages = JSON.parse(r.StagesJSON || '[]').map(function (s) {
@@ -689,7 +717,7 @@ function getAllData() {
   })();
 
   return {
-    schema: { stages: STAGES, agencies: AGENCIES, categories: categories, defaultSplit: DEFAULT_SPLIT },
+    schema: { materialStages: MATERIAL_STAGES, designStages: DESIGN_STAGES, agencies: AGENCIES, categories: categories, defaultSplit: DEFAULT_SPLIT },
     projects: projects,
     spaces: spaces,
     materialsConfig: materialsConfig,
@@ -737,7 +765,10 @@ function updateProject(payload) {
 function addSpaceInternal_(spaceSheet, projectId, name, sortOrder) {
   var existingIds = rowsToObjects_(spaceSheet).map(function (r) { return r.SpaceID; });
   var spaceId = nextId_('S', existingIds);
-  spaceSheet.appendRow([spaceId, projectId, name, sortOrder]);
+  var design = JSON.stringify(DESIGN_STAGES.map(function (s) {
+    return { stage: s, status: 'Not Started', target: '', actual: '', note: '' };
+  }));
+  spaceSheet.appendRow([spaceId, projectId, name, sortOrder, design, 'Not Started']);
   return spaceId;
 }
 
@@ -853,6 +884,13 @@ function addDaysISO_(iso, n) {
 // Shared write path for a single activity's status/dates/notes/%, used by both
 // updateActivity (one activity at a time) and submitActivityUpdates (a batch
 // from the daily-log form) — keeps the Done-flip and cascade logic in one place.
+function getSpaceDesignStage_(ss, spaceId, stageName) {
+  var space = rowsToObjects_(getTab_(ss, 'SPACES')).filter(function (s) { return s.SpaceID === spaceId; })[0];
+  if (!space) return null;
+  var design = JSON.parse(space.DesignJSON || '[]');
+  return design.filter(function (d) { return d.stage === stageName; })[0] || null;
+}
+
 function applyActivityChange_(ss, activityId, changes) {
   var sheet = getTab_(ss, 'SCHEDULE_ACTIVITIES');
   var row = findRowById_(sheet, 'ActivityID', activityId);
@@ -862,18 +900,24 @@ function applyActivityChange_(ss, activityId, changes) {
   headers.forEach(function (h, i) { idx[h] = i; });
   var current = sheet.getRange(row, 1, 1, headers.length).getValues()[0];
 
+  // Execution can be scheduled/dragged freely, but can't actually start until
+  // the space's final design (WD) is delivered.
+  if (changes.status === 'In Progress' || changes.status === 'Done') {
+    var wd = getSpaceDesignStage_(ss, current[idx.SpaceID], 'WD');
+    if (!wd || wd.status !== 'Done') {
+      throw new Error('Design (WD) must be delivered for this space before execution can start.');
+    }
+  }
+
   if (changes.startDate !== undefined) current[idx.StartDate] = changes.startDate;
   if (changes.endDate !== undefined) current[idx.EndDate] = changes.endDate;
   if (changes.status !== undefined) current[idx.Status] = changes.status;
   if (changes.notes !== undefined) current[idx.Notes] = changes.notes;
   if (changes.percentComplete !== undefined) current[idx.PercentComplete] = Number(changes.percentComplete);
   current[idx.UpdatedAt] = new Date();
+  if (changes.status === 'Done') current[idx.PercentComplete] = 100;
   sheet.getRange(row, 1, 1, headers.length).setValues([current]);
 
-  if (changes.status === 'Done') {
-    markInstallationDone_(ss, current[idx.ProjectID], current[idx.SpaceID], current[idx.Agency], current[idx.EndDate]);
-    sheet.getRange(row, idx.PercentComplete + 1).setValue(100);
-  }
   cascadeFromActivity_(ss, activityId);
 }
 
@@ -928,25 +972,6 @@ function setActivityDependencies(payload) {
   return { ok: true };
 }
 
-function markInstallationDone_(ss, projectId, spaceId, agency, endDate) {
-  var sheet = getTab_(ss, 'BOQ_ITEMS');
-  var headers = sheet.getDataRange().getValues()[0];
-  var stagesColIdx = headers.indexOf('StagesJSON');
-  var rollupColIdx = headers.indexOf('RollupStatus');
-  var rows = rowsToObjects_(sheet).filter(function (r) {
-    return r.ProjectID === projectId && r.SpaceID === spaceId && r.Agency === agency;
-  });
-  rows.forEach(function (r) {
-    var stages = JSON.parse(r.StagesJSON || '[]');
-    var installStage = stages.filter(function (s) { return s.stage === 'Installation'; })[0];
-    if (!installStage) return;
-    installStage.status = 'Done';
-    installStage.actual = normDate_(endDate) || endDate;
-    var rollup = computeRollup_(stages);
-    sheet.getRange(r._row, stagesColIdx + 1).setValue(JSON.stringify(stages));
-    sheet.getRange(r._row, rollupColIdx + 1).setValue(rollup);
-  });
-}
 
 function syncBoqDueDates_(ss, projectId, spaceId, agency, dueDate) {
   var sheet = getTab_(ss, 'BOQ_ITEMS');
@@ -1057,6 +1082,68 @@ function updateStage(payload) {
   sheet.getRange(row, rollupColIdx + 1).setValue(rollup);
   sheet.getRange(row, updatedColIdx + 1).setValue(new Date());
   return { rollup: rollup, stages: stages };
+}
+
+function updateDesignStage(payload) {
+  // payload: { spaceId, stage, status, target, actual, note }
+  var ss = getSS_();
+  var sheet = getTab_(ss, 'SPACES');
+  var row = findRowById_(sheet, 'SpaceID', payload.spaceId);
+  if (row < 0) throw new Error('Space not found');
+  var headers = sheet.getDataRange().getValues()[0];
+  var designColIdx = headers.indexOf('DesignJSON');
+  var rollupColIdx = headers.indexOf('DesignRollup');
+  var stages = JSON.parse(sheet.getRange(row, designColIdx + 1).getValue() || '[]');
+  var stageObj = stages.filter(function (s) { return s.stage === payload.stage; })[0];
+  if (!stageObj) throw new Error('Design stage not found');
+  if (payload.status !== undefined) stageObj.status = payload.status;
+  if (payload.target !== undefined) stageObj.target = payload.target;
+  if (payload.actual !== undefined) stageObj.actual = payload.actual;
+  if (payload.note !== undefined) stageObj.note = payload.note;
+
+  var rollup = computeRollup_(stages);
+  sheet.getRange(row, designColIdx + 1).setValue(JSON.stringify(stages));
+  sheet.getRange(row, rollupColIdx + 1).setValue(rollup);
+
+  if (payload.stage === 'WD' && stageObj.status === 'Done') {
+    var wdDoneDate = normDate_(stageObj.actual) || stageObj.actual || todayISO_();
+    gateExecutionOnDesign_(ss, payload.spaceId, wdDoneDate);
+  }
+  return { rollup: rollup, stages: stages };
+}
+
+function todayISO_() {
+  return Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd');
+}
+
+// Once a space's final design is delivered, any execution activity still
+// scheduled to start before that date auto-shifts to start right at it
+// (preserving its own duration), then cascades into its own dependents via
+// the existing predecessor-chain logic.
+function gateExecutionOnDesign_(ss, spaceId, wdDoneDate) {
+  var sheet = getTab_(ss, 'SCHEDULE_ACTIVITIES');
+  var headers = sheet.getDataRange().getValues()[0];
+  var idx = {};
+  headers.forEach(function (h, i) { idx[h] = i; });
+  var acts = rowsToObjects_(sheet).filter(function (a) { return a.SpaceID === spaceId; });
+
+  acts.forEach(function (a) {
+    var start = normDate_(a.StartDate) || a.StartDate;
+    if (start >= wdDoneDate) return;
+    var end = normDate_(a.EndDate) || a.EndDate;
+    var deltaMs = new Date(wdDoneDate) - new Date(start);
+    var newStart = shiftDateISO_(start, deltaMs);
+    var newEnd = shiftDateISO_(end, deltaMs);
+
+    var current = sheet.getRange(a._row, 1, 1, headers.length).getValues()[0];
+    current[idx.StartDate] = newStart;
+    current[idx.EndDate] = newEnd;
+    current[idx.UpdatedAt] = new Date();
+    sheet.getRange(a._row, 1, 1, headers.length).setValues([current]);
+
+    syncBoqDueDates_(ss, a.ProjectID, a.SpaceID, a.Agency, newEnd);
+    cascadeFromActivity_(ss, a.ActivityID);
+  });
 }
 
 // ---------- Daily log ----------
