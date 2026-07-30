@@ -290,7 +290,6 @@ var STATE = {
 var STATUS_LIST = ['Not Started','In Progress','Done','N/A'];
 var ACTIVITY_STATUS_LIST = ['Not Started','In Progress','Done'];
 var DELAY_REASONS = ['Design Finalization Delay','Material Selection Delay','Order Placement Delay','Material Delivery Delay (Vendor)','Execution Agency Delay','Other'];
-function cls(status){ return String(status).replace(/\//g,'-').replace(/\s+/g,'-'); }
 // Delay is derived, not stored: compares the current date against the
 // original plan (and, failing that, against today) rather than relying on a
 // manually-set "Delayed" status. Done is always green regardless of timing.
@@ -426,11 +425,35 @@ function delayedItems(projectId){
   });
   return out;
 }
+// "Remaining" = full Amount of any BOQ line not yet Delivered — the simplest
+// proxy for "still needs to be arranged" (once delivered, a material's cost
+// is essentially locked in regardless of what's technically been invoiced;
+// we don't track invoiced/received at all, that's the client's own books).
+function boqLineRemaining_(r){
+  var delivery = r.Stages.filter(function(s){return s.stage==='Delivery';})[0];
+  return (!delivery || delivery.status!=='Done') ? (Number(r.Amount)||0) : 0;
+}
 function projectCashSummary(projectId){
   var rows = boqItemsOf(projectId);
-  var boq=0, inv=0, rec=0;
-  rows.forEach(function(r){ boq+=Number(r.Amount)||0; inv+=Number(r.Invoiced)||0; rec+=Number(r.Received)||0; });
-  return { boq:boq, invoiced:inv, received:rec, outstanding: inv-rec };
+  var boq=0, remaining=0;
+  rows.forEach(function(r){ boq+=Number(r.Amount)||0; remaining+=boqLineRemaining_(r); });
+  return { boq:boq, remaining:remaining };
+}
+// Remaining-to-arrange amount, grouped by Space then Category (matches the
+// original Excel takeoff sheet's own layout) — "how much to spend on what".
+function remainingBreakdown(projectId){
+  var bySpace = {};
+  boqItemsOf(projectId).forEach(function(r){
+    var amt = boqLineRemaining_(r);
+    if(!amt) return;
+    if(!bySpace[r.SpaceID]){
+      var sp = STATE.data.spaces.filter(function(s){return s.SpaceID===r.SpaceID;})[0];
+      bySpace[r.SpaceID] = { spaceId: r.SpaceID, name: sp?sp.Name:'', total: 0, byCategory: {} };
+    }
+    bySpace[r.SpaceID].total += amt;
+    bySpace[r.SpaceID].byCategory[r.Category] = (bySpace[r.SpaceID].byCategory[r.Category]||0) + amt;
+  });
+  return Object.keys(bySpace).map(function(k){ return bySpace[k]; }).sort(function(a,b){ return b.total-a.total; });
 }
 function daysToMoveIn(project){
   if(!project.TargetMoveIn) return null;
@@ -792,11 +815,19 @@ function openAddMaterialModal(spaceId){
     '<div class="field"><label>Material</label><select id="am-material" onchange="renderAmDetails()"></select></div>'+
     '<div class="field-row">'+
       '<div class="field"><label>Unit</label><input id="am-unit" readonly></div>'+
-      '<div class="field"><label>Rate</label><input id="am-rate" readonly></div>'+
+      '<div class="field"><label>Agency</label><input id="am-agency" readonly></div>'+
     '</div>'+
-    '<div class="field"><label>Agency</label><input id="am-agency" readonly></div>'+
-    '<div class="field"><label>Quantity</label><input type="number" id="am-qty" value="1" min="0" step="any" oninput="renderAmAmount()"></div>'+
-    '<div class="field-hint">Amount: <b id="am-amount">&mdash;</b></div>'+
+    '<div class="field-hint">Measurement (like your BoQ takeoff sheet) &mdash; Quantity = Length &times; Width &times; Depth/Nos. For a simple count item, leave Length &amp; Width at 1 and enter the count in Depth/Nos.</div>'+
+    '<div class="field-row">'+
+      '<div class="field"><label>Length</label><input type="number" id="am-length" value="1" min="0" step="any" oninput="renderAmAmount()"></div>'+
+      '<div class="field"><label>Width</label><input type="number" id="am-width" value="1" min="0" step="any" oninput="renderAmAmount()"></div>'+
+      '<div class="field"><label>Depth / Nos.</label><input type="number" id="am-depth" value="1" min="0" step="any" oninput="renderAmAmount()"></div>'+
+    '</div>'+
+    '<div class="field-row">'+
+      '<div class="field"><label>Contingency Qty</label><input type="number" id="am-contingency" value="0" min="0" step="any" oninput="renderAmAmount()"></div>'+
+      '<div class="field"><label>Revised Rate <span style="font-weight:400;">(optional)</span></label><input type="number" id="am-revrate" placeholder="Catalog rate: —" min="0" step="any" oninput="renderAmAmount()"></div>'+
+    '</div>'+
+    '<div class="field-hint">Quantity: <b id="am-qty-preview">&mdash;</b> &middot; Amount: <b id="am-amount">&mdash;</b></div>'+
     '<div class="modal-actions"><button class="btn" onclick="closeModal()">Cancel</button>'+
     '<button class="btn primary" onclick="saveAddMaterial(\''+spaceId+'\')">Add to BOQ</button></div>';
   showModal(body);
@@ -814,21 +845,37 @@ function renderAmDetails(){
   var matId = document.getElementById('am-material').value;
   var mat = STATE.data.materialsConfig.filter(function(m){ return m.MaterialID===matId; })[0];
   document.getElementById('am-unit').value = mat ? mat.Unit : '';
-  document.getElementById('am-rate').value = mat ? mat.Rate : '';
   document.getElementById('am-agency').value = mat ? mat.Agency : '';
+  document.getElementById('am-revrate').placeholder = 'Catalog rate: ' + (mat ? fmtMoney(mat.Rate) : '—');
   renderAmAmount();
 }
 function renderAmAmount(){
-  var rate = Number(document.getElementById('am-rate').value)||0;
-  var qty = Number(document.getElementById('am-qty').value)||0;
-  document.getElementById('am-amount').textContent = fmtMoney(rate*qty);
+  var matId = document.getElementById('am-material').value;
+  var mat = STATE.data.materialsConfig.filter(function(m){ return m.MaterialID===matId; })[0];
+  var catalogRate = mat ? Number(mat.Rate)||0 : 0;
+  var length = Number(document.getElementById('am-length').value)||0;
+  var width = Number(document.getElementById('am-width').value)||0;
+  var depth = Number(document.getElementById('am-depth').value)||0;
+  var contingency = Number(document.getElementById('am-contingency').value)||0;
+  var revRateRaw = document.getElementById('am-revrate').value;
+  var rate = revRateRaw!=='' ? Number(revRateRaw)||0 : catalogRate;
+  var qty = length*width*depth + contingency;
+  document.getElementById('am-qty-preview').textContent = qty;
+  document.getElementById('am-amount').textContent = fmtMoney(qty*rate);
 }
 function saveAddMaterial(spaceId){
   var materialId = document.getElementById('am-material').value;
-  var qty = Number(document.getElementById('am-qty').value)||0;
+  var length = document.getElementById('am-length').value;
+  var width = document.getElementById('am-width').value;
+  var depthNos = document.getElementById('am-depth').value;
+  var contingency = document.getElementById('am-contingency').value;
+  var revisedRate = document.getElementById('am-revrate').value;
   if(!materialId){ toast('Pick a material'); return; }
-  if(!qty){ toast('Enter a quantity'); return; }
-  apiPost('addBoqItem', { projectId: STATE.currentProjectId, spaceId: spaceId, materialId: materialId, quantity: qty }).then(function(){
+  if((Number(length)*Number(width)*Number(depthNos) + Number(contingency||0)) <= 0){ toast('Enter a measurement'); return; }
+  apiPost('addBoqItem', {
+    projectId: STATE.currentProjectId, spaceId: spaceId, materialId: materialId,
+    length: length, width: width, depthNos: depthNos, contingency: contingency||0, revisedRate: revisedRate
+  }).then(function(){
     closeModal(); toast('Added to BOQ'); refresh();
   }).catch(showErr);
 }
@@ -1140,11 +1187,10 @@ function renderCashflowView(){
   var pid = STATE.currentProjectId;
   var cash = projectCashSummary(pid);
   var spaces = spacesOf(pid);
+  var breakdown = remainingBreakdown(pid);
   var html = '<div class="stat-strip">'+
     statBox('Total BOQ Value', fmtMoney(cash.boq))+
-    statBox('Invoiced', fmtMoney(cash.invoiced))+
-    statBox('Received', fmtMoney(cash.received),'accent')+
-    statBox('Outstanding', fmtMoney(cash.outstanding), cash.outstanding>0?'red':'')+
+    statBox('Remaining to Arrange', fmtMoney(cash.remaining), cash.remaining>0?'accent':'')+
     '</div>';
 
   spaces.forEach(function(sp){
@@ -1152,67 +1198,76 @@ function renderCashflowView(){
     if(!rows.length) return;
     html += '<div class="section-title">'+escapeHtml(sp.Name)+'</div>';
     html += '<div class="table-wrap"><table class="tracker"><thead><tr>'+
-      '<th>Material</th><th>Qty</th><th>Amount</th><th>Split (Order/Delivery/Install)</th><th>Invoiced</th><th>Received</th>'+
-      '<th>Due Date</th><th>Status</th><th></th></tr></thead><tbody>';
+      '<th>Material</th><th>Unit</th><th>Measurement</th><th>Contingency</th><th>Qty</th><th>Rate</th><th>Amount</th>'+
+      '<th>Status</th><th></th></tr></thead><tbody>';
     rows.forEach(function(r){
-      var s = r.Split||{};
+      var hasRevised = r.RevisedRate!==''&&r.RevisedRate!==undefined&&r.RevisedRate!==null;
       html += '<tr>'+
         '<td>'+escapeHtml(r.MaterialName)+'</td>'+
+        '<td>'+escapeHtml(r.Unit)+'</td>'+
+        '<td style="font-size:11.5px;color:var(--ink-soft);">'+r.Length+'&times;'+r.Width+'&times;'+r.DepthNos+'</td>'+
+        '<td>'+(r.Contingency||0)+'</td>'+
         '<td>'+r.Quantity+'</td>'+
+        '<td>'+fmtMoney(r.EffectiveRate)+(hasRevised?' <span style="text-decoration:line-through;color:var(--ink-soft);font-size:11px;">'+fmtMoney(r.Rate)+'</span>':'')+'</td>'+
         '<td>'+fmtMoney(r.Amount)+'</td>'+
-        '<td>'+ (s['Order Placement']||0)+'% / '+(s['Delivery']||0)+'% / '+(s['Installation']||0)+'%</td>'+
-        '<td>'+fmtMoney(r.Invoiced)+'</td>'+
-        '<td>'+fmtMoney(r.Received)+'</td>'+
-        '<td>'+fmtDate(r.DueDate)+'</td>'+
-        '<td><span class="status-chip '+cls(r.PaymentStatus||'Pending')+'">'+(r.PaymentStatus||'Pending')+'</span></td>'+
+        '<td><span class="status-chip '+rollupVisual(r.Stages, r.RollupStatus)+'">'+escapeHtml(r.RollupStatus)+'</span></td>'+
         '<td><button class="btn small" onclick="openCashflowModal(\''+r.BoqItemID+'\')">Edit</button></td>'+
         '</tr>';
     });
     html += '</tbody></table></div>';
   });
   if(!cash.boq) html += '<div class="empty-state">No BOQ items yet — add materials in the Planning tab first.</div>';
+
+  if(breakdown.length){
+    html += '<div class="section-title">Remaining to Arrange <span style="font-weight:400;text-transform:none;letter-spacing:0;">— what\'s still owed, and for what</span></div>';
+    breakdown.forEach(function(sp){
+      html += '<div style="margin-bottom:12px;"><div style="font-weight:700;font-size:13.5px;">'+escapeHtml(sp.name)+' &mdash; '+fmtMoney(sp.total)+'</div>';
+      html += '<ul class="plain">'+Object.keys(sp.byCategory).sort().map(function(cat){
+        return '<li>'+escapeHtml(cat)+' &mdash; '+fmtMoney(sp.byCategory[cat])+'</li>';
+      }).join('')+'</ul></div>';
+    });
+  }
   return html;
 }
 function openCashflowModal(boqItemId){
   var r = STATE.data.boqItems.filter(function(c){return c.BoqItemID===boqItemId;})[0];
-  var s = r.Split||{};
-  var body = '<h3>'+escapeHtml(r.MaterialName)+' &mdash; BOQ / Payment</h3>'+
+  var body = '<h3>'+escapeHtml(r.MaterialName)+' &mdash; BOQ</h3>'+
+    '<div class="field-hint">Quantity = Length &times; Width &times; Depth/Nos. For a simple count item, leave Length &amp; Width at 1 and enter the count in Depth/Nos.</div>'+
     '<div class="field-row">'+
-      '<div class="field"><label>Quantity</label><input type="number" id="cf-qty" value="'+(r.Quantity||0)+'"></div>'+
-      '<div class="field"><label>Rate</label><input id="cf-rate" value="'+fmtMoney(r.Rate)+'" readonly></div>'+
+      '<div class="field"><label>Length</label><input type="number" id="cf-length" value="'+(r.Length||0)+'" min="0" step="any" oninput="renderCfAmount()"></div>'+
+      '<div class="field"><label>Width</label><input type="number" id="cf-width" value="'+(r.Width||0)+'" min="0" step="any" oninput="renderCfAmount()"></div>'+
+      '<div class="field"><label>Depth / Nos.</label><input type="number" id="cf-depth" value="'+(r.DepthNos||0)+'" min="0" step="any" oninput="renderCfAmount()"></div>'+
     '</div>'+
     '<div class="field-row">'+
-      '<div class="field"><label>% at Order Placement</label><input type="number" id="cf-s1" value="'+(s['Order Placement']||0)+'"></div>'+
-      '<div class="field"><label>% at Delivery</label><input type="number" id="cf-s2" value="'+(s['Delivery']||0)+'"></div>'+
+      '<div class="field"><label>Contingency Qty</label><input type="number" id="cf-contingency" value="'+(r.Contingency||0)+'" min="0" step="any" oninput="renderCfAmount()"></div>'+
+      '<div class="field"><label>Rate <span style="font-weight:400;">(catalog: '+fmtMoney(r.Rate)+')</span></label><input type="number" id="cf-revrate" data-catalog-rate="'+(Number(r.Rate)||0)+'" value="'+(r.RevisedRate!==''&&r.RevisedRate!==undefined&&r.RevisedRate!==null?r.RevisedRate:'')+'" placeholder="'+fmtMoney(r.Rate)+'" min="0" step="any" oninput="renderCfAmount()"></div>'+
     '</div>'+
-    '<div class="field"><label>% at Installation</label><input type="number" id="cf-s3" value="'+(s['Installation']||0)+'"></div>'+
-    '<div class="field-row">'+
-      '<div class="field"><label>Amount Invoiced</label><input type="number" id="cf-inv" value="'+(r.Invoiced||0)+'"></div>'+
-      '<div class="field"><label>Amount Received</label><input type="number" id="cf-rec" value="'+(r.Received||0)+'"></div>'+
-    '</div>'+
-    '<div class="field-row">'+
-      '<div class="field"><label>Due Date</label><input type="date" id="cf-due" value="'+(r.DueDate||'')+'"></div>'+
-      '<div class="field"><label>Payment Status</label><select id="cf-status">'+
-        ['Pending','Partial','Paid'].map(function(o){return '<option '+(r.PaymentStatus===o?'selected':'')+'>'+o+'</option>';}).join('')+
-      '</select></div>'+
-    '</div>'+
+    '<div class="field-hint">Quantity: <b id="cf-qty-preview">'+r.Quantity+'</b> &middot; Amount: <b id="cf-amount">'+fmtMoney(r.Amount)+'</b></div>'+
     '<div class="modal-actions"><button class="btn" onclick="closeModal()">Cancel</button>'+
     '<button class="btn primary" onclick="saveCashflow(\''+boqItemId+'\')">Save</button></div>';
   showModal(body);
 }
+function renderCfAmount(){
+  var length = Number(document.getElementById('cf-length').value)||0;
+  var width = Number(document.getElementById('cf-width').value)||0;
+  var depth = Number(document.getElementById('cf-depth').value)||0;
+  var contingency = Number(document.getElementById('cf-contingency').value)||0;
+  var revRateEl = document.getElementById('cf-revrate');
+  var revRateRaw = revRateEl.value;
+  var catalogRate = Number(revRateEl.dataset.catalogRate)||0;
+  var rate = revRateRaw!=='' ? Number(revRateRaw)||0 : catalogRate;
+  var qty = length*width*depth + contingency;
+  document.getElementById('cf-qty-preview').textContent = qty;
+  document.getElementById('cf-amount').textContent = fmtMoney(qty*rate);
+}
 function saveCashflow(boqItemId){
   var payload = {
     boqItemId: boqItemId,
-    quantity: document.getElementById('cf-qty').value,
-    split: {
-      'Order Placement': Number(document.getElementById('cf-s1').value)||0,
-      'Delivery': Number(document.getElementById('cf-s2').value)||0,
-      'Installation': Number(document.getElementById('cf-s3').value)||0
-    },
-    invoiced: document.getElementById('cf-inv').value,
-    received: document.getElementById('cf-rec').value,
-    dueDate: document.getElementById('cf-due').value,
-    status: document.getElementById('cf-status').value
+    length: document.getElementById('cf-length').value,
+    width: document.getElementById('cf-width').value,
+    depthNos: document.getElementById('cf-depth').value,
+    contingency: document.getElementById('cf-contingency').value,
+    revisedRate: document.getElementById('cf-revrate').value
   };
   apiPost('updateBoqItem', payload).then(function(){
     closeModal(); toast('Saved'); refresh();
@@ -1368,6 +1423,7 @@ function renderReportView(){
   var procurement = pendingProcurement(pid);
   var agencies = delayedAgencies(pid);
   var critical = computeCriticalPath(pid);
+  var cash = projectCashSummary(pid);
   var weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate()-7);
   var completions = [];
   boqItemsOf(pid).forEach(function(r){
@@ -1398,7 +1454,8 @@ function renderReportView(){
   html += '<div class="stat-strip"><div class="stat-box"><div class="label">Delayed Items</div><div class="value '+(delayed.length?'red':'')+'">'+delayed.length+'</div></div>'+
     '<div class="stat-box"><div class="label">Pending Procurement</div><div class="value '+(procurement.length?'accent':'')+'">'+procurement.length+'</div></div>'+
     '<div class="stat-box"><div class="label">Agencies Running Late</div><div class="value '+(agencies.length?'red':'')+'">'+agencies.length+'</div></div>'+
-    '<div class="stat-box"><div class="label">Critical Path Length</div><div class="value">'+critical.length+'</div></div></div>';
+    '<div class="stat-box"><div class="label">Critical Path Length</div><div class="value">'+critical.length+'</div></div>'+
+    '<div class="stat-box"><div class="label">Remaining to Arrange</div><div class="value">'+fmtMoney(cash.remaining)+'</div></div></div>';
 
   html += '<div class="section-title">This Week\'s Completions</div>';
   html += completions.length ? '<ul class="plain">'+completions.map(function(c){return '<li>'+c+'</li>';}).join('')+'</ul>' : '<p style="color:var(--ink-soft);font-size:13px;">No stage completions logged in the last 7 days.</p>';
@@ -1586,6 +1643,17 @@ function renderClientView(){
   html += '<div class="client-grid">'+
     statBox('Overall Progress', pct+'%','accent')+
     '</div>';
+
+  var cash = projectCashSummary(pid);
+  if(cash.remaining>0){
+    var breakdown = remainingBreakdown(pid);
+    html += '<div class="card" style="margin-bottom:18px;"><h3>Funds Needed to Complete</h3>'+
+      '<div style="font-size:22px;font-weight:800;margin-bottom:8px;">'+fmtMoney(cash.remaining)+'</div>'+
+      '<div style="font-size:12px;color:var(--ink-soft);margin-bottom:10px;">To complete all remaining work &mdash; here\'s what it\'s for:</div>'+
+      '<ul class="plain">'+breakdown.slice(0,6).map(function(sp){
+        return '<li>'+escapeHtml(sp.name)+' &mdash; '+fmtMoney(sp.total)+'</li>';
+      }).join('')+'</ul></div>';
+  }
 
   html += '<div class="section-title">Progress by Space</div><div class="grid-cards">';
   spaces.forEach(function(s){

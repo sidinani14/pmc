@@ -19,8 +19,6 @@ var AGENCIES = [
   'Acoustics', 'Decor', 'Glass work', 'Modular Furniture', 'Sliding profile door'
 ];
 
-var DEFAULT_SPLIT = { 'Order Placement': 40, 'Delivery': 40, 'Installation': 20 };
-
 var SHEET_PROP_KEY = 'PMC_SHEET_ID';
 
 // ---------- Materials catalog seed ----------
@@ -169,76 +167,80 @@ var MATERIALS_SEED = [
 
 // Real BOQ line items pulled from the user's Entrance Foyer + Drawing Room
 // (same source file) — used to seed a faithful, realistic demo project.
+// Length/Width/DepthNos are the exact figures from the user's original
+// "BoQ (Quantity Sheet)" takeoff tab (Phase 1 extraction) — L*W*D reproduces
+// each line's original Quantity exactly. A few lines carry a demo
+// contingency/revisedRate to illustrate those fields (Phase 6).
 var DEMO_BOQ_ITEMS = [
-  { space: 'Entrance Foyer', name: 'Italian Floor', category: 'FLOORING', agency: 'Flooring', unit: 'Sq. Ft', qty: 80, rate: 500 },
-  { space: 'Entrance Foyer', name: 'Ply Board Ceiling finish with veneer', category: 'CARPENTRY', agency: 'Carpentry', unit: 'Sq. Ft', qty: 80, rate: 200 },
-  { space: 'Entrance Foyer', name: 'Ceiling veneer polish', category: 'PAINT & Polish', agency: 'Painting', unit: 'Sq. Ft', qty: 80, rate: 250 },
-  { space: 'Entrance Foyer', name: 'Wall punning', category: 'PAINT & Polish', agency: 'Painting', unit: 'Sq. Ft', qty: 50, rate: 50 },
-  { space: 'Entrance Foyer', name: 'Texture paint', category: 'PAINT & Polish', agency: 'Painting', unit: 'Sq. Ft', qty: 50, rate: 150 },
-  { space: 'Entrance Foyer', name: 'Back Lit Stone panel', category: 'FLOORING', agency: 'Flooring', unit: 'Sq. Ft', qty: 35, rate: 500 },
-  { space: 'Entrance Foyer', name: 'Venner panel', category: 'CARPENTRY', agency: 'Carpentry', unit: 'Sq. Ft', qty: 26, rate: 200 },
-  { space: 'Entrance Foyer', name: 'Venner panel polish', category: 'PAINT & Polish', agency: 'Painting', unit: 'Sq. Ft', qty: 26, rate: 250 },
-  { space: 'Entrance Foyer', name: 'Wall punning', category: 'PAINT & Polish', agency: 'Painting', unit: 'Sq. Ft', qty: 25, rate: 150 },
-  { space: 'Entrance Foyer', name: 'Texture paint', category: 'FLOORING', agency: 'Flooring', unit: 'Sq. Ft', qty: 25, rate: 500 },
-  { space: 'Entrance Foyer', name: 'Opening to living room jamming', category: 'FLOORING', agency: 'Flooring', unit: 'Sq. Ft', qty: 66, rate: 500 },
-  { space: 'Entrance Foyer', name: 'Around Opening to living room stone panel', category: 'FLOORING', agency: 'Flooring', unit: 'Sq. Ft', qty: 9, rate: 500 },
-  { space: 'Entrance Foyer', name: 'Around Door to drawing room stone panel', category: 'FLOORING', agency: 'Flooring', unit: 'Sq. Ft', qty: 10.5, rate: 500 },
-  { space: 'Entrance Foyer', name: 'Wall punning', category: 'PAINT & Polish', agency: 'Painting', unit: 'Sq. Ft', qty: 40, rate: 50 },
-  { space: 'Entrance Foyer', name: 'Texture paint', category: 'PAINT & Polish', agency: 'Painting', unit: 'Sq. Ft', qty: 40, rate: 40 },
-  { space: 'Entrance Foyer', name: 'Wall punning', category: 'PAINT & Polish', agency: 'Painting', unit: 'Sq. Ft', qty: 25, rate: 40 },
-  { space: 'Entrance Foyer', name: 'Texture paint', category: 'FLOORING', agency: 'Flooring', unit: 'Sq. Ft', qty: 25, rate: 500 },
-  { space: 'Entrance Foyer', name: 'Main Entrance Jamming', category: 'FLOORING', agency: 'Flooring', unit: 'Sq. Ft', qty: 66, rate: 500 },
-  { space: 'Entrance Foyer', name: 'Around Opening stone panel', category: 'FLOORING', agency: 'Flooring', unit: 'Sq. Ft', qty: 9, rate: 500 },
-  { space: 'Entrance Foyer', name: 'Main Entrance Metal door', category: 'D/W sections', agency: 'Windows', unit: 'Sq. Ft', qty: 42.5, rate: 3000 },
-  { space: 'Entrance Foyer', name: 'Console', category: 'FURNITURE', agency: 'Modular Furniture', unit: 'Nos.', qty: 1, rate: 40000 },
-  { space: 'Entrance Foyer', name: 'Wall lamp', category: 'DECOR', agency: 'Decor', unit: 'L.S.', qty: 1, rate: 15000 },
-  { space: 'Entrance Foyer', name: 'Sitting human figure light', category: 'Lighting & Fan', agency: 'Electrical', unit: 'L.S.', qty: 1, rate: 25000 },
-  { space: 'Entrance Foyer', name: 'Chandelier', category: 'DECOR', agency: 'Decor', unit: 'Nos.', qty: 1, rate: 4000 },
-  { space: 'Entrance Foyer', name: 'Planter', category: 'DECOR', agency: 'Decor', unit: 'L.S.', qty: 1, rate: 4000 },
-  { space: 'Entrance Foyer', name: 'Artifacts and table decor', category: 'DECOR', agency: 'Decor', unit: 'L.S.', qty: 3, rate: 4000 },
-  { space: 'Entrance Foyer', name: 'Rug', category: 'Furnishings', agency: 'Furnishing', unit: 'Sq. Ft', qty: 16, rate: 750 },
-  { space: 'Drawing Room', name: 'Italian Floor', category: 'FLOORING', agency: 'Flooring', unit: 'Sq. Ft', qty: 270, rate: 500 },
-  { space: 'Drawing Room', name: 'Gypsum Board Ceiling', category: 'FALSE CEILING', agency: 'False Ceiling', unit: 'Sq. Ft', qty: 270, rate: 120 },
-  { space: 'Drawing Room', name: 'Gypsum Board Ceiling Paint', category: 'PAINT & Polish', agency: 'Painting', unit: 'Sq. Ft', qty: 270, rate: 80 },
-  { space: 'Drawing Room', name: 'Wall punning', category: 'PAINT & Polish', agency: 'Painting', unit: 'Sq. Ft', qty: 80, rate: 50 },
-  { space: 'Drawing Room', name: 'Texture paint', category: 'PAINT & Polish', agency: 'Painting', unit: 'Sq. Ft', qty: 80, rate: 40 },
-  { space: 'Drawing Room', name: 'Stone panel', category: 'FLOORING', agency: 'Flooring', unit: 'Sq. Ft', qty: 35, rate: 500 },
-  { space: 'Drawing Room', name: 'Window to living room stone frame', category: 'FLOORING', agency: 'Flooring', unit: 'Sq. Ft', qty: 93, rate: 500 },
-  { space: 'Drawing Room', name: 'Metal Jali', category: 'PARTTIONS', agency: 'Fabrication', unit: 'Sq. Ft', qty: 48, rate: 2500 },
-  { space: 'Drawing Room', name: 'Window to living room stone panel above window', category: 'FLOORING', agency: 'Flooring', unit: 'Sq. Ft', qty: 1.5, rate: 500 },
-  { space: 'Drawing Room', name: 'Wall punning', category: 'PAINT & Polish', agency: 'Painting', unit: 'Sq. Ft', qty: 90, rate: 50 },
-  { space: 'Drawing Room', name: 'Texture paint', category: 'PAINT & Polish', agency: 'Painting', unit: 'Sq. Ft', qty: 90, rate: 150 },
-  { space: 'Drawing Room', name: 'Stone panel', category: 'FLOORING', agency: 'Flooring', unit: 'Sq. Ft', qty: 20, rate: 500 },
-  { space: 'Drawing Room', name: 'Concerte interior sqaure grid and finished in paint', category: 'FLOORING', agency: 'Flooring', unit: 'Sq. Ft', qty: 15, rate: 320 },
-  { space: 'Drawing Room', name: 'Wall punning with grooves', category: 'PAINT & Polish', agency: 'Painting', unit: 'Sq. Ft', qty: 22.4, rate: 50 },
-  { space: 'Drawing Room', name: 'Texture paint', category: 'PAINT & Polish', agency: 'Painting', unit: 'Sq. Ft', qty: 22.4, rate: 150 },
-  { space: 'Drawing Room', name: 'Window to balcony stone frame', category: 'FLOORING', agency: 'Flooring', unit: 'Sq. Ft', qty: 93, rate: 500 },
-  { space: 'Drawing Room', name: 'Around Window to living room stone panel', category: 'FLOORING', agency: 'Flooring', unit: 'Sq. Ft', qty: 24, rate: 500 },
-  { space: 'Drawing Room', name: 'Wall punning', category: 'PAINT & Polish', agency: 'Painting', unit: 'Sq. Ft', qty: 75, rate: 50 },
-  { space: 'Drawing Room', name: 'Texture paint', category: 'PAINT & Polish', agency: 'Painting', unit: 'Sq. Ft', qty: 75, rate: 40 },
-  { space: 'Drawing Room', name: 'Stone panel', category: 'FLOORING', agency: 'Flooring', unit: 'Sq. Ft', qty: 20, rate: 500 },
-  { space: 'Drawing Room', name: 'Sliding Glass Window section', category: 'D/W sections', agency: 'Windows', unit: 'Sq. Ft', qty: 52.5, rate: 1200 },
-  { space: 'Drawing Room', name: 'Stone panel', category: 'FLOORING', agency: 'Flooring', unit: 'Sq. Ft', qty: 35, rate: 500 },
-  { space: 'Drawing Room', name: 'Wall punning', category: 'PAINT & Polish', agency: 'Painting', unit: 'Sq. Ft', qty: 45, rate: 50 },
-  { space: 'Drawing Room', name: 'Texture paint', category: 'PAINT & Polish', agency: 'Painting', unit: 'Sq. Ft', qty: 45, rate: 40 },
-  { space: 'Drawing Room', name: 'Around Opening to foyer stone panel', category: 'FLOORING', agency: 'Flooring', unit: 'Sq. Ft', qty: 9.75, rate: 500 },
-  { space: 'Drawing Room', name: 'Sliding Glass Door 12mm sliding toughened glass with powder coated aluminium section with Hardware and handles', category: 'D/W sections', agency: 'Windows', unit: 'Sq. Ft', qty: 38, rate: 1200 },
-  { space: 'Drawing Room', name: 'Opening stone frame', category: 'FLOORING', agency: 'Flooring', unit: 'Sq. Ft', qty: 72, rate: 500 },
-  { space: 'Drawing Room', name: '3 seater sofa', category: 'FURNITURE', agency: 'Modular Furniture', unit: 'Nos.', qty: 1, rate: 75000 },
-  { space: 'Drawing Room', name: '2 seater ottoman', category: 'FURNITURE', agency: 'Modular Furniture', unit: 'Nos.', qty: 1, rate: 50000 },
-  { space: 'Drawing Room', name: '3 seater sofa', category: 'FURNITURE', agency: 'Modular Furniture', unit: 'Nos.', qty: 1, rate: 75000 },
-  { space: 'Drawing Room', name: 'chair', category: 'FURNITURE', agency: 'Modular Furniture', unit: 'Nos.', qty: 1, rate: 25000 },
-  { space: 'Drawing Room', name: 'Center table', category: 'FURNITURE', agency: 'Modular Furniture', unit: 'L.S.', qty: 1, rate: 30000 },
-  { space: 'Drawing Room', name: 'Side nesting table', category: 'FURNITURE', agency: 'Modular Furniture', unit: 'L.S.', qty: 1, rate: 15000 },
-  { space: 'Drawing Room', name: 'Painting - Wall Hung (3\'6" x 4\'6" in size)', category: 'DECOR', agency: 'Decor', unit: 'L.S.', qty: 1, rate: 15000 },
-  { space: 'Drawing Room', name: 'Floor Lamp', category: 'DECOR', agency: 'Decor', unit: 'Nos.', qty: 1, rate: 8000 },
-  { space: 'Drawing Room', name: 'Hanging LIght', category: 'Lighting & Fan', agency: 'Electrical', unit: 'L.S.', qty: 1, rate: 5000 },
-  { space: 'Drawing Room', name: 'Ceiling Fan', category: 'Lighting & Fan', agency: 'Electrical', unit: 'Nos.', qty: 1, rate: 10000 },
-  { space: 'Drawing Room', name: 'Artifacts and table decor', category: 'DECOR', agency: 'Decor', unit: 'L.S.', qty: 10, rate: 4000 },
-  { space: 'Drawing Room', name: 'Roman curtain', category: 'Furnishings', agency: 'Furnishing', unit: 'Sq. Ft', qty: 52.5, rate: 150 },
-  { space: 'Drawing Room', name: 'Rug', category: 'Furnishings', agency: 'Furnishing', unit: 'Sq. Ft', qty: 96, rate: 250 },
-  { space: 'Drawing Room', name: 'Throws', category: 'Furnishings', agency: 'Furnishing', unit: 'Nos.', qty: 3, rate: 3000 },
-  { space: 'Drawing Room', name: 'Throw cushions', category: 'Furnishings', agency: 'Furnishing', unit: 'Nos.', qty: 10, rate: 800 },
+  { space: 'Entrance Foyer', name: 'Italian Floor', category: 'FLOORING', agency: 'Flooring', unit: 'Sq. Ft', length: 10, width: 8, depthNos: 1, rate: 500 },
+  { space: 'Entrance Foyer', name: 'Ply Board Ceiling finish with veneer', category: 'CARPENTRY', agency: 'Carpentry', unit: 'Sq. Ft', length: 10, width: 8, depthNos: 1, rate: 200 },
+  { space: 'Entrance Foyer', name: 'Ceiling veneer polish', category: 'PAINT & Polish', agency: 'Painting', unit: 'Sq. Ft', length: 10, width: 8, depthNos: 1, rate: 250 },
+  { space: 'Entrance Foyer', name: 'Wall punning', category: 'PAINT & Polish', agency: 'Painting', unit: 'Sq. Ft', length: 10, width: 2.5, depthNos: 2, rate: 50 },
+  { space: 'Entrance Foyer', name: 'Texture paint', category: 'PAINT & Polish', agency: 'Painting', unit: 'Sq. Ft', length: 10, width: 2.5, depthNos: 2, rate: 150 },
+  { space: 'Entrance Foyer', name: 'Back Lit Stone panel', category: 'FLOORING', agency: 'Flooring', unit: 'Sq. Ft', length: 3.5, width: 10, depthNos: 1, rate: 500 },
+  { space: 'Entrance Foyer', name: 'Venner panel', category: 'CARPENTRY', agency: 'Carpentry', unit: 'Sq. Ft', length: 26, width: 1, depthNos: 1, rate: 200 },
+  { space: 'Entrance Foyer', name: 'Venner panel polish', category: 'PAINT & Polish', agency: 'Painting', unit: 'Sq. Ft', length: 26, width: 1, depthNos: 1, rate: 250 },
+  { space: 'Entrance Foyer', name: 'Wall punning', category: 'PAINT & Polish', agency: 'Painting', unit: 'Sq. Ft', length: 2.5, width: 10, depthNos: 1, rate: 150 },
+  { space: 'Entrance Foyer', name: 'Texture paint', category: 'FLOORING', agency: 'Flooring', unit: 'Sq. Ft', length: 2.5, width: 10, depthNos: 1, rate: 500 },
+  { space: 'Entrance Foyer', name: 'Opening to living room jamming', category: 'FLOORING', agency: 'Flooring', unit: 'Sq. Ft', length: 22, width: 1, depthNos: 3, rate: 500 },
+  { space: 'Entrance Foyer', name: 'Around Opening to living room stone panel', category: 'FLOORING', agency: 'Flooring', unit: 'Sq. Ft', length: 1.5, width: 6, depthNos: 1, rate: 500 },
+  { space: 'Entrance Foyer', name: 'Around Door to drawing room stone panel', category: 'FLOORING', agency: 'Flooring', unit: 'Sq. Ft', length: 7, width: 1.5, depthNos: 1, rate: 500 },
+  { space: 'Entrance Foyer', name: 'Wall punning', category: 'PAINT & Polish', agency: 'Painting', unit: 'Sq. Ft', length: 2, width: 10, depthNos: 2, rate: 50 },
+  { space: 'Entrance Foyer', name: 'Texture paint', category: 'PAINT & Polish', agency: 'Painting', unit: 'Sq. Ft', length: 2, width: 10, depthNos: 2, rate: 40 },
+  { space: 'Entrance Foyer', name: 'Wall punning', category: 'PAINT & Polish', agency: 'Painting', unit: 'Sq. Ft', length: 2.5, width: 10, depthNos: 1, rate: 40, contingency: 5 },
+  { space: 'Entrance Foyer', name: 'Texture paint', category: 'FLOORING', agency: 'Flooring', unit: 'Sq. Ft', length: 2.5, width: 10, depthNos: 1, rate: 500 },
+  { space: 'Entrance Foyer', name: 'Main Entrance Jamming', category: 'FLOORING', agency: 'Flooring', unit: 'Sq. Ft', length: 22, width: 1, depthNos: 3, rate: 500 },
+  { space: 'Entrance Foyer', name: 'Around Opening stone panel', category: 'FLOORING', agency: 'Flooring', unit: 'Sq. Ft', length: 1.5, width: 6, depthNos: 1, rate: 500 },
+  { space: 'Entrance Foyer', name: 'Main Entrance Metal door', category: 'D/W sections', agency: 'Windows', unit: 'Sq. Ft', length: 8.5, width: 5, depthNos: 1, rate: 3000, revisedRate: 3200 },
+  { space: 'Entrance Foyer', name: 'Console', category: 'FURNITURE', agency: 'Modular Furniture', unit: 'Nos.', length: 1, width: 1, depthNos: 1, rate: 40000 },
+  { space: 'Entrance Foyer', name: 'Wall lamp', category: 'DECOR', agency: 'Decor', unit: 'L.S.', length: 1, width: 1, depthNos: 1, rate: 15000 },
+  { space: 'Entrance Foyer', name: 'Sitting human figure light', category: 'Lighting & Fan', agency: 'Electrical', unit: 'L.S.', length: 1, width: 1, depthNos: 1, rate: 25000 },
+  { space: 'Entrance Foyer', name: 'Chandelier', category: 'DECOR', agency: 'Decor', unit: 'Nos.', length: 1, width: 1, depthNos: 1, rate: 4000 },
+  { space: 'Entrance Foyer', name: 'Planter', category: 'DECOR', agency: 'Decor', unit: 'L.S.', length: 1, width: 1, depthNos: 1, rate: 4000 },
+  { space: 'Entrance Foyer', name: 'Artifacts and table decor', category: 'DECOR', agency: 'Decor', unit: 'L.S.', length: 1, width: 1, depthNos: 3, rate: 4000 },
+  { space: 'Entrance Foyer', name: 'Rug', category: 'Furnishings', agency: 'Furnishing', unit: 'Sq. Ft', length: 4, width: 4, depthNos: 1, rate: 750 },
+  { space: 'Drawing Room', name: 'Italian Floor', category: 'FLOORING', agency: 'Flooring', unit: 'Sq. Ft', length: 15, width: 18, depthNos: 1, rate: 500, contingency: 15 },
+  { space: 'Drawing Room', name: 'Gypsum Board Ceiling', category: 'FALSE CEILING', agency: 'False Ceiling', unit: 'Sq. Ft', length: 15, width: 18, depthNos: 1, rate: 120 },
+  { space: 'Drawing Room', name: 'Gypsum Board Ceiling Paint', category: 'PAINT & Polish', agency: 'Painting', unit: 'Sq. Ft', length: 15, width: 18, depthNos: 1, rate: 80 },
+  { space: 'Drawing Room', name: 'Wall punning', category: 'PAINT & Polish', agency: 'Painting', unit: 'Sq. Ft', length: 10, width: 8, depthNos: 1, rate: 50 },
+  { space: 'Drawing Room', name: 'Texture paint', category: 'PAINT & Polish', agency: 'Painting', unit: 'Sq. Ft', length: 10, width: 8, depthNos: 1, rate: 40 },
+  { space: 'Drawing Room', name: 'Stone panel', category: 'FLOORING', agency: 'Flooring', unit: 'Sq. Ft', length: 3.5, width: 10, depthNos: 1, rate: 500 },
+  { space: 'Drawing Room', name: 'Window to living room stone frame', category: 'FLOORING', agency: 'Flooring', unit: 'Sq. Ft', length: 31, width: 1, depthNos: 3, rate: 500 },
+  { space: 'Drawing Room', name: 'Metal Jali', category: 'PARTTIONS', agency: 'Fabrication', unit: 'Sq. Ft', length: 8, width: 6, depthNos: 1, rate: 2500 },
+  { space: 'Drawing Room', name: 'Window to living room stone panel above window', category: 'FLOORING', agency: 'Flooring', unit: 'Sq. Ft', length: 1.5, width: 1, depthNos: 1, rate: 500 },
+  { space: 'Drawing Room', name: 'Wall punning', category: 'PAINT & Polish', agency: 'Painting', unit: 'Sq. Ft', length: 9, width: 10, depthNos: 1, rate: 50 },
+  { space: 'Drawing Room', name: 'Texture paint', category: 'PAINT & Polish', agency: 'Painting', unit: 'Sq. Ft', length: 9, width: 10, depthNos: 1, rate: 150 },
+  { space: 'Drawing Room', name: 'Stone panel', category: 'FLOORING', agency: 'Flooring', unit: 'Sq. Ft', length: 2, width: 10, depthNos: 1, rate: 500 },
+  { space: 'Drawing Room', name: 'Concerte interior sqaure grid and finished in paint', category: 'FLOORING', agency: 'Flooring', unit: 'Sq. Ft', length: 1.5, width: 10, depthNos: 1, rate: 320 },
+  { space: 'Drawing Room', name: 'Wall punning with grooves', category: 'PAINT & Polish', agency: 'Painting', unit: 'Sq. Ft', length: 16, width: 1.4, depthNos: 1, rate: 50 },
+  { space: 'Drawing Room', name: 'Texture paint', category: 'PAINT & Polish', agency: 'Painting', unit: 'Sq. Ft', length: 16, width: 1.4, depthNos: 1, rate: 150 },
+  { space: 'Drawing Room', name: 'Window to balcony stone frame', category: 'FLOORING', agency: 'Flooring', unit: 'Sq. Ft', length: 31, width: 1, depthNos: 3, rate: 500 },
+  { space: 'Drawing Room', name: 'Around Window to living room stone panel', category: 'FLOORING', agency: 'Flooring', unit: 'Sq. Ft', length: 3, width: 8, depthNos: 1, rate: 500 },
+  { space: 'Drawing Room', name: 'Wall punning', category: 'PAINT & Polish', agency: 'Painting', unit: 'Sq. Ft', length: 7.5, width: 10, depthNos: 1, rate: 50 },
+  { space: 'Drawing Room', name: 'Texture paint', category: 'PAINT & Polish', agency: 'Painting', unit: 'Sq. Ft', length: 7.5, width: 10, depthNos: 1, rate: 40 },
+  { space: 'Drawing Room', name: 'Stone panel', category: 'FLOORING', agency: 'Flooring', unit: 'Sq. Ft', length: 2, width: 10, depthNos: 1, rate: 500 },
+  { space: 'Drawing Room', name: 'Sliding Glass Window section', category: 'D/W sections', agency: 'Windows', unit: 'Sq. Ft', length: 7, width: 7.5, depthNos: 1, rate: 1200 },
+  { space: 'Drawing Room', name: 'Stone panel', category: 'FLOORING', agency: 'Flooring', unit: 'Sq. Ft', length: 3.5, width: 10, depthNos: 1, rate: 500 },
+  { space: 'Drawing Room', name: 'Wall punning', category: 'PAINT & Polish', agency: 'Painting', unit: 'Sq. Ft', length: 4.5, width: 10, depthNos: 1, rate: 50 },
+  { space: 'Drawing Room', name: 'Texture paint', category: 'PAINT & Polish', agency: 'Painting', unit: 'Sq. Ft', length: 4.5, width: 10, depthNos: 1, rate: 40 },
+  { space: 'Drawing Room', name: 'Around Opening to foyer stone panel', category: 'FLOORING', agency: 'Flooring', unit: 'Sq. Ft', length: 6.5, width: 1.5, depthNos: 1, rate: 500 },
+  { space: 'Drawing Room', name: 'Sliding Glass Door 12mm sliding toughened glass with powder coated aluminium section with Hardware and handles', category: 'D/W sections', agency: 'Windows', unit: 'Sq. Ft', length: 4, width: 9.5, depthNos: 1, rate: 1200 },
+  { space: 'Drawing Room', name: 'Opening stone frame', category: 'FLOORING', agency: 'Flooring', unit: 'Sq. Ft', length: 24, width: 1, depthNos: 3, rate: 500 },
+  { space: 'Drawing Room', name: '3 seater sofa', category: 'FURNITURE', agency: 'Modular Furniture', unit: 'Nos.', length: 1, width: 1, depthNos: 1, rate: 75000, revisedRate: 78000 },
+  { space: 'Drawing Room', name: '2 seater ottoman', category: 'FURNITURE', agency: 'Modular Furniture', unit: 'Nos.', length: 1, width: 1, depthNos: 1, rate: 50000 },
+  { space: 'Drawing Room', name: '3 seater sofa', category: 'FURNITURE', agency: 'Modular Furniture', unit: 'Nos.', length: 1, width: 1, depthNos: 1, rate: 75000 },
+  { space: 'Drawing Room', name: 'chair', category: 'FURNITURE', agency: 'Modular Furniture', unit: 'Nos.', length: 1, width: 1, depthNos: 1, rate: 25000 },
+  { space: 'Drawing Room', name: 'Center table', category: 'FURNITURE', agency: 'Modular Furniture', unit: 'L.S.', length: 1, width: 1, depthNos: 1, rate: 30000 },
+  { space: 'Drawing Room', name: 'Side nesting table', category: 'FURNITURE', agency: 'Modular Furniture', unit: 'L.S.', length: 1, width: 1, depthNos: 1, rate: 15000 },
+  { space: 'Drawing Room', name: 'Painting - Wall Hung (3\'6" x 4\'6" in size)', category: 'DECOR', agency: 'Decor', unit: 'L.S.', length: 1, width: 1, depthNos: 1, rate: 15000 },
+  { space: 'Drawing Room', name: 'Floor Lamp', category: 'DECOR', agency: 'Decor', unit: 'Nos.', length: 1, width: 1, depthNos: 1, rate: 8000 },
+  { space: 'Drawing Room', name: 'Hanging LIght', category: 'Lighting & Fan', agency: 'Electrical', unit: 'L.S.', length: 1, width: 1, depthNos: 1, rate: 5000 },
+  { space: 'Drawing Room', name: 'Ceiling Fan', category: 'Lighting & Fan', agency: 'Electrical', unit: 'Nos.', length: 1, width: 1, depthNos: 1, rate: 10000 },
+  { space: 'Drawing Room', name: 'Artifacts and table decor', category: 'DECOR', agency: 'Decor', unit: 'L.S.', length: 1, width: 1, depthNos: 10, rate: 4000 },
+  { space: 'Drawing Room', name: 'Roman curtain', category: 'Furnishings', agency: 'Furnishing', unit: 'Sq. Ft', length: 7.5, width: 7, depthNos: 1, rate: 150 },
+  { space: 'Drawing Room', name: 'Rug', category: 'Furnishings', agency: 'Furnishing', unit: 'Sq. Ft', length: 8, width: 12, depthNos: 1, rate: 250 },
+  { space: 'Drawing Room', name: 'Throws', category: 'Furnishings', agency: 'Furnishing', unit: 'Nos.', length: 1, width: 1, depthNos: 3, rate: 3000 },
+  { space: 'Drawing Room', name: 'Throw cushions', category: 'Furnishings', agency: 'Furnishing', unit: 'Nos.', length: 1, width: 1, depthNos: 10, rate: 800 },
 ];
 
 // ---------- Notifications ----------
@@ -305,8 +307,8 @@ var TABS = {
   BOQ_ITEMS: {
     name: 'BOQ_ITEMS', headers: [
       'BoqItemID', 'ProjectID', 'SpaceID', 'MaterialID', 'MaterialName', 'Category', 'Agency',
-      'Unit', 'Quantity', 'Rate', 'Amount', 'SplitJSON', 'Invoiced', 'Received', 'DueDate',
-      'PaymentStatus', 'StagesJSON', 'RollupStatus', 'Notes', 'CreatedAt', 'UpdatedAt'
+      'Unit', 'Length', 'Width', 'DepthNos', 'Contingency', 'Rate', 'RevisedRate',
+      'StagesJSON', 'RollupStatus', 'Notes', 'CreatedAt', 'UpdatedAt'
     ]
   },
   DAILY_LOG: { name: 'DAILY_LOG', headers: ['LogID', 'Date', 'ProjectID', 'SpaceID', 'Entry', 'LoggedBy', 'HasBlocker', 'CreatedAt', 'UpdatesJSON'] },
@@ -408,8 +410,6 @@ function nextId_(prefix, existingIds) {
 }
 
 function computeRollup_(stages) {
-  var hasDelayed = stages.some(function (s) { return s.status === 'Delayed'; });
-  if (hasDelayed) return 'Delayed';
   var allDone = stages.every(function (s) { return s.status === 'Done' || s.status === 'N/A'; });
   if (allDone) return 'Done';
   var anyProgress = stages.some(function (s) { return s.status === 'In Progress'; });
@@ -471,11 +471,16 @@ function clearDataRows_(sheet) {
 
 function migrateToBoq() {
   var ss = getSS_();
-  ['TRACKER', 'CASHFLOW'].forEach(function (name) {
+  // BOQ_ITEMS' column layout changed structurally (Phase 6: L/W/D/Contingency/
+  // RevisedRate replacing Quantity/Amount/payment-tracking columns) — delete
+  // and let getTab_ recreate it with the current header row, rather than just
+  // clearing data rows under a stale header.
+  ['TRACKER', 'CASHFLOW', 'BOQ_ITEMS'].forEach(function (name) {
     var sh = ss.getSheetByName(name);
     if (sh) ss.deleteSheet(sh);
   });
-  ['PROJECTS', 'SPACES', 'DAILY_LOG', 'MATERIALS_CONFIG', 'BOQ_ITEMS', 'SCHEDULE_ACTIVITIES'].forEach(function (key) {
+  getTab_(ss, 'BOQ_ITEMS');
+  ['PROJECTS', 'SPACES', 'DAILY_LOG', 'MATERIALS_CONFIG', 'SCHEDULE_ACTIVITIES'].forEach(function (key) {
     clearDataRows_(getTab_(ss, key));
   });
 
@@ -540,12 +545,9 @@ function seedDemoProject_(ss) {
     var rollup = computeRollup_(stages);
     var mat = findMaterialByName_(materialsRows, item.name);
     var boqItemId = 'BOQ-' + Utilities.getUuid().slice(0, 6);
-    var amount = item.qty * item.rate;
     boqSheet.appendRow([
       boqItemId, projectId, spaceId, mat ? mat.MaterialID : '', item.name, item.category, item.agency,
-      item.unit, item.qty, item.rate, amount, JSON.stringify(DEFAULT_SPLIT),
-      Math.round(amount * (mode === 'ahead' ? 0.7 : 0.3)), Math.round(amount * (mode === 'ahead' ? 0.55 : 0.15)),
-      daysFromNowISO_(14), mode === 'ahead' ? 'Partial' : 'Pending',
+      item.unit, item.length, item.width, item.depthNos, item.contingency || 0, item.rate, item.revisedRate || '',
       JSON.stringify(stages), rollup, '', now, now
     ]);
 
@@ -699,7 +701,7 @@ function doPost(e) {
 // ---------- Client-callable API ----------
 
 function getSchema() {
-  return { materialStages: MATERIAL_STAGES, designStages: DESIGN_STAGES, agencies: AGENCIES, defaultSplit: DEFAULT_SPLIT };
+  return { materialStages: MATERIAL_STAGES, designStages: DESIGN_STAGES, agencies: AGENCIES };
 }
 
 function normDate_(v) {
@@ -731,8 +733,9 @@ function getAllData() {
       s.originalTarget = normDate_(s.originalTarget) || s.target;
       return s;
     });
-    r.Split = JSON.parse(r.SplitJSON || '{}');
-    r.DueDate = normDate_(r.DueDate);
+    r.Quantity = (Number(r.Length) || 0) * (Number(r.Width) || 0) * (Number(r.DepthNos) || 0) + (Number(r.Contingency) || 0);
+    r.EffectiveRate = r.RevisedRate !== '' && r.RevisedRate !== undefined && r.RevisedRate !== null ? Number(r.RevisedRate) : Number(r.Rate) || 0;
+    r.Amount = r.Quantity * r.EffectiveRate;
     return r;
   });
   var dailyLog = rowsToObjects_(getTab_(ss, 'DAILY_LOG')).map(function (r) {
@@ -757,7 +760,7 @@ function getAllData() {
   })();
 
   return {
-    schema: { materialStages: MATERIAL_STAGES, designStages: DESIGN_STAGES, agencies: AGENCIES, categories: categories, defaultSplit: DEFAULT_SPLIT },
+    schema: { materialStages: MATERIAL_STAGES, designStages: DESIGN_STAGES, agencies: AGENCIES, categories: categories },
     projects: projects,
     spaces: spaces,
     materialsConfig: materialsConfig,
@@ -857,15 +860,18 @@ function updateMaterial(payload) {
 // ---------- BOQ line items ----------
 
 function addBoqItem(payload) {
-  // payload: { projectId, spaceId, materialId, quantity }
+  // payload: { projectId, spaceId, materialId, length, width, depthNos, contingency, revisedRate }
   var ss = getSS_();
   var matSheet = getTab_(ss, 'MATERIALS_CONFIG');
   var material = rowsToObjects_(matSheet).filter(function (m) { return m.MaterialID === payload.materialId; })[0];
   if (!material) throw new Error('Material not found');
 
-  var qty = Number(payload.quantity) || 0;
+  var length = Number(payload.length) || 0;
+  var width = Number(payload.width) || 0;
+  var depthNos = Number(payload.depthNos) || 0;
+  var contingency = Number(payload.contingency) || 0;
   var rate = Number(material.Rate) || 0;
-  var amount = qty * rate;
+  var revisedRate = payload.revisedRate !== undefined && payload.revisedRate !== '' ? Number(payload.revisedRate) : '';
   var stages = STAGES.map(function (stageName) {
     return { stage: stageName, status: 'Not Started', target: '', actual: '', note: '' };
   });
@@ -875,7 +881,7 @@ function addBoqItem(payload) {
   var now = new Date();
   boqSheet.appendRow([
     boqItemId, payload.projectId, payload.spaceId, material.MaterialID, material.Name, material.Category, material.Agency,
-    material.Unit, qty, rate, amount, JSON.stringify(DEFAULT_SPLIT), 0, 0, '', 'Pending',
+    material.Unit, length, width, depthNos, contingency, rate, revisedRate,
     JSON.stringify(stages), 'Not Started', '', now, now
   ]);
   ensureActivityForBoqItem_(ss, payload.projectId, payload.spaceId, material.Agency);
@@ -1014,18 +1020,6 @@ function setActivityDependencies(payload) {
 }
 
 
-function syncBoqDueDates_(ss, projectId, spaceId, agency, dueDate) {
-  var sheet = getTab_(ss, 'BOQ_ITEMS');
-  var headers = sheet.getDataRange().getValues()[0];
-  var dueColIdx = headers.indexOf('DueDate');
-  var rows = rowsToObjects_(sheet).filter(function (r) {
-    return r.ProjectID === projectId && r.SpaceID === spaceId && r.Agency === agency;
-  });
-  rows.forEach(function (r) {
-    sheet.getRange(r._row, dueColIdx + 1).setValue(dueDate);
-  });
-}
-
 // Finish-to-start cascade: any activity that lists `activityId` as a predecessor
 // must start no earlier than that predecessor's end. If violated, shift the
 // dependent forward (preserving its own duration) and recurse into its own
@@ -1062,7 +1056,6 @@ function cascadeFromActivity_(ss, activityId, visited) {
     current[idx.UpdatedAt] = new Date();
     sheet.getRange(successor._row, 1, 1, headers.length).setValues([current]);
 
-    syncBoqDueDates_(ss, successor.ProjectID, successor.SpaceID, successor.Agency, newEnd);
     cascadeFromActivity_(ss, successor.ActivityID, visited);
   });
 }
@@ -1074,7 +1067,7 @@ function shiftDateISO_(iso, deltaMs) {
 }
 
 function updateBoqItem(payload) {
-  // payload: { boqItemId, quantity?, invoiced?, received?, dueDate?, status?, split?, notes? }
+  // payload: { boqItemId, length?, width?, depthNos?, contingency?, revisedRate?, notes? }
   var ss = getSS_();
   var sheet = getTab_(ss, 'BOQ_ITEMS');
   var row = findRowById_(sheet, 'BoqItemID', payload.boqItemId);
@@ -1084,15 +1077,11 @@ function updateBoqItem(payload) {
   var idx = {};
   headers.forEach(function (h, i) { idx[h] = i; });
 
-  if (payload.quantity !== undefined) {
-    current[idx.Quantity] = Number(payload.quantity);
-    current[idx.Amount] = Number(payload.quantity) * Number(current[idx.Rate]);
-  }
-  if (payload.split !== undefined) current[idx.SplitJSON] = JSON.stringify(payload.split);
-  if (payload.invoiced !== undefined) current[idx.Invoiced] = Number(payload.invoiced);
-  if (payload.received !== undefined) current[idx.Received] = Number(payload.received);
-  if (payload.dueDate !== undefined) current[idx.DueDate] = payload.dueDate;
-  if (payload.status !== undefined) current[idx.PaymentStatus] = payload.status;
+  if (payload.length !== undefined) current[idx.Length] = Number(payload.length);
+  if (payload.width !== undefined) current[idx.Width] = Number(payload.width);
+  if (payload.depthNos !== undefined) current[idx.DepthNos] = Number(payload.depthNos);
+  if (payload.contingency !== undefined) current[idx.Contingency] = Number(payload.contingency);
+  if (payload.revisedRate !== undefined) current[idx.RevisedRate] = payload.revisedRate === '' ? '' : Number(payload.revisedRate);
   if (payload.notes !== undefined) current[idx.Notes] = payload.notes;
   current[idx.UpdatedAt] = new Date();
   sheet.getRange(row, 1, 1, headers.length).setValues([current]);
@@ -1190,7 +1179,6 @@ function gateExecutionOnDesign_(ss, spaceId, wdDoneDate) {
     current[idx.UpdatedAt] = new Date();
     sheet.getRange(a._row, 1, 1, headers.length).setValues([current]);
 
-    syncBoqDueDates_(ss, a.ProjectID, a.SpaceID, a.Agency, newEnd);
     cascadeFromActivity_(ss, a.ActivityID);
   });
 }
