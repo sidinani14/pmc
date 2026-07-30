@@ -308,7 +308,7 @@ var TABS = {
     name: 'BOQ_ITEMS', headers: [
       'BoqItemID', 'ProjectID', 'SpaceID', 'MaterialID', 'MaterialName', 'Category', 'Agency',
       'Unit', 'Length', 'Width', 'DepthNos', 'Contingency', 'Rate', 'RevisedRate',
-      'StagesJSON', 'RollupStatus', 'Notes', 'CreatedAt', 'UpdatedAt'
+      'StagesJSON', 'RollupStatus', 'Notes', 'ImagesJSON', 'CreatedAt', 'UpdatedAt'
     ]
   },
   DAILY_LOG: { name: 'DAILY_LOG', headers: ['LogID', 'Date', 'ProjectID', 'SpaceID', 'Entry', 'LoggedBy', 'HasBlocker', 'CreatedAt', 'UpdatesJSON'] },
@@ -364,6 +364,8 @@ function getTab_(ss, key) {
     ensureColumn_(sh, 'DelayReason', '');
   } else if (key === 'DAILY_LOG') {
     ensureColumn_(sh, 'UpdatesJSON', '[]');
+  } else if (key === 'BOQ_ITEMS') {
+    ensureColumn_(sh, 'ImagesJSON', '[]');
   } else if (key === 'SPACES') {
     var defaultDesign = JSON.stringify(DESIGN_STAGES.map(function (s) {
       return { stage: s, status: 'Not Started', target: '', actual: '', note: '' };
@@ -689,6 +691,7 @@ function doPost(e) {
     addProject: addProject, updateProject: updateProject, addSpace: addSpace,
     addMaterial: addMaterial, updateMaterial: updateMaterial,
     addBoqItem: addBoqItem, updateBoqItem: updateBoqItem,
+    addBoqImage: addBoqImage, removeBoqImage: removeBoqImage,
     updateStage: updateStage, updateDesignStage: updateDesignStage, addDailyLog: addDailyLog,
     updateActivity: updateActivity, setActivityDependencies: setActivityDependencies,
     submitActivityUpdates: submitActivityUpdates
@@ -736,6 +739,7 @@ function getAllData() {
     r.Quantity = (Number(r.Length) || 0) * (Number(r.Width) || 0) * (Number(r.DepthNos) || 0) + (Number(r.Contingency) || 0);
     r.EffectiveRate = r.RevisedRate !== '' && r.RevisedRate !== undefined && r.RevisedRate !== null ? Number(r.RevisedRate) : Number(r.Rate) || 0;
     r.Amount = r.Quantity * r.EffectiveRate;
+    r.Images = JSON.parse(r.ImagesJSON || '[]');
     return r;
   });
   var dailyLog = rowsToObjects_(getTab_(ss, 'DAILY_LOG')).map(function (r) {
@@ -976,14 +980,29 @@ function updateActivity(payload) {
 }
 
 function submitActivityUpdates(payload) {
-  // payload: { date, projectId, spaceId, loggedBy, hasBlocker, notes, updates: [{activityId, status, endDate, percentComplete}] }
+  // payload: { date, projectId, spaceId, loggedBy, hasBlocker, notes, designStageDone,
+  //            updates: [{activityId, status, endDate, percentComplete, orderPlacementDone}] }
   var ss = getSS_();
   var summaryParts = [];
   (payload.updates || []).forEach(function (u) {
     applyActivityChange_(ss, u.activityId, { status: u.status, endDate: u.endDate, percentComplete: u.percentComplete });
     var actRow = rowsToObjects_(getTab_(ss, 'SCHEDULE_ACTIVITIES')).filter(function (a) { return a.ActivityID === u.activityId; })[0];
     summaryParts.push((actRow ? actRow.Agency : u.activityId) + ': ' + u.status + ' (' + u.percentComplete + '%)');
+    if (u.orderPlacementDone && actRow) {
+      bulkMarkOrderPlacementDone_(payload.projectId, payload.spaceId, actRow.Agency, payload.date);
+      summaryParts.push(actRow.Agency + ': Order Placement done');
+    }
   });
+  if (payload.designStageDone) {
+    var pendingStage = getSpaceDesignStage_(ss, payload.spaceId, payload.designStageDone);
+    if (pendingStage && pendingStage.status !== 'Done') {
+      updateDesignStage({
+        spaceId: payload.spaceId, stage: payload.designStageDone, status: 'Done',
+        target: pendingStage.target || payload.date, actual: payload.date
+      });
+      summaryParts.push('Design ' + payload.designStageDone + ' finalized');
+    }
+  }
   var entry = summaryParts.join('; ') + (payload.notes ? ' — ' + payload.notes : '');
 
   var logSheet = getTab_(ss, 'DAILY_LOG');
@@ -1088,6 +1107,76 @@ function updateBoqItem(payload) {
   return { ok: true };
 }
 
+// ---------- BOQ reference images (Google Drive) ----------
+// Folder IDs are cached in Script Properties on first creation rather than
+// searched for by name on every call — one fewer Drive API round trip per
+// upload. (Note: the narrower `drive.file` scope was tried first but
+// DriveApp.createFolder itself requires the full `drive` scope in Apps
+// Script, not just file-level access.)
+function getOrCreateProjectImagesFolder_(projectId) {
+  var props = PropertiesService.getScriptProperties();
+  var key = 'PMC_IMG_FOLDER_' + projectId;
+  var folderId = props.getProperty(key);
+  if (folderId) {
+    try { return DriveApp.getFolderById(folderId); } catch (e) { /* fall through and recreate */ }
+  }
+  var rootId = props.getProperty('PMC_IMG_ROOT_FOLDER');
+  var root = null;
+  if (rootId) {
+    try { root = DriveApp.getFolderById(rootId); } catch (e) { root = null; }
+  }
+  if (!root) {
+    root = DriveApp.createFolder('PMC Reference Images');
+    props.setProperty('PMC_IMG_ROOT_FOLDER', root.getId());
+  }
+  var folder = root.createFolder('Project ' + projectId);
+  props.setProperty(key, folder.getId());
+  return folder;
+}
+
+function addBoqImage(payload) {
+  // payload: { boqItemId, projectId, filename, mimeType, dataBase64 }
+  var ss = getSS_();
+  var sheet = getTab_(ss, 'BOQ_ITEMS');
+  var row = findRowById_(sheet, 'BoqItemID', payload.boqItemId);
+  if (row < 0) throw new Error('BOQ item not found');
+  var headers = sheet.getDataRange().getValues()[0];
+  var idx = {};
+  headers.forEach(function (h, i) { idx[h] = i; });
+  var current = sheet.getRange(row, 1, 1, headers.length).getValues()[0];
+
+  var folder = getOrCreateProjectImagesFolder_(payload.projectId);
+  var blob = Utilities.newBlob(Utilities.base64Decode(payload.dataBase64), payload.mimeType, payload.filename);
+  var file = folder.createFile(blob);
+  file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+
+  var images = JSON.parse(current[idx.ImagesJSON] || '[]');
+  images.push({ fileId: file.getId(), name: payload.filename, uploadedAt: new Date().toISOString() });
+  current[idx.ImagesJSON] = JSON.stringify(images);
+  current[idx.UpdatedAt] = new Date();
+  sheet.getRange(row, 1, 1, headers.length).setValues([current]);
+  return { images: images };
+}
+
+function removeBoqImage(payload) {
+  // payload: { boqItemId, fileId }
+  var ss = getSS_();
+  var sheet = getTab_(ss, 'BOQ_ITEMS');
+  var row = findRowById_(sheet, 'BoqItemID', payload.boqItemId);
+  if (row < 0) throw new Error('BOQ item not found');
+  var headers = sheet.getDataRange().getValues()[0];
+  var idx = {};
+  headers.forEach(function (h, i) { idx[h] = i; });
+  var current = sheet.getRange(row, 1, 1, headers.length).getValues()[0];
+
+  var images = JSON.parse(current[idx.ImagesJSON] || '[]').filter(function (im) { return im.fileId !== payload.fileId; });
+  current[idx.ImagesJSON] = JSON.stringify(images);
+  current[idx.UpdatedAt] = new Date();
+  sheet.getRange(row, 1, 1, headers.length).setValues([current]);
+  try { DriveApp.getFileById(payload.fileId).setTrashed(true); } catch (e) { /* already gone */ }
+  return { images: images };
+}
+
 // Shared write path for a single stage object (BOQ or Design) — captures
 // `originalTarget` the first time a target is ever saved (never overwritten
 // after), and carries an optional delay reason.
@@ -1123,6 +1212,23 @@ function updateStage(payload) {
   sheet.getRange(row, rollupColIdx + 1).setValue(rollup);
   sheet.getRange(row, updatedColIdx + 1).setValue(new Date());
   return { rollup: rollup, stages: stages };
+}
+
+// Bulk-marks the Order Placement stage Done for every BOQ line in a
+// space+agency that isn't already Done — matches the granularity a site
+// supervisor actually thinks at ("flooring materials are ordered"), used by
+// the Daily Log's per-trade "Order Placement done" checkbox. Reuses
+// updateStage per line rather than duplicating its stage-mutation logic.
+function bulkMarkOrderPlacementDone_(projectId, spaceId, agency, date) {
+  var rows = rowsToObjects_(getTab_(getSS_(), 'BOQ_ITEMS')).filter(function (r) {
+    return r.ProjectID === projectId && r.SpaceID === spaceId && r.Agency === agency;
+  });
+  rows.forEach(function (r) {
+    var stages = JSON.parse(r.StagesJSON || '[]');
+    var stageObj = stages.filter(function (s) { return s.stage === 'Order Placement'; })[0];
+    if (!stageObj || stageObj.status === 'Done') return;
+    updateStage({ boqItemId: r.BoqItemID, stage: 'Order Placement', status: 'Done', target: stageObj.target || date, actual: date });
+  });
 }
 
 function updateDesignStage(payload) {

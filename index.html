@@ -130,6 +130,10 @@
   .subitem-cell .cat{display:block;font-size:10.5px;color:var(--ink-soft);font-weight:600;text-transform:uppercase;
     letter-spacing:.03em;}
   .subitem-cell .agency-chip{margin-top:3px;}
+  input.inline-edit, select.inline-edit{border:1px solid transparent;background:transparent;font:inherit;
+    color:inherit;padding:3px 4px;border-radius:4px;width:100%;min-width:0;}
+  input.inline-edit:hover, select.inline-edit:hover{border-color:var(--line);}
+  input.inline-edit:focus, select.inline-edit:focus{border-color:var(--accent);background:#fff;outline:none;}
   .stage-cell{width:44px;height:26px;border-radius:6px;cursor:pointer;border:1px solid transparent;
     display:flex;align-items:center;justify-content:center;position:relative;}
   .stage-cell.vs-green{background:var(--vs-green);}
@@ -273,7 +277,8 @@ var STATE = {
   loggedByName: localStorage.getItem('pmc_logged_by') || '',
   filters: { space:'', category:'', stage:'', status:'' },
   locked: false,             // true when opened via a client share link — can't switch role/project
-  showCatalog: false         // Materials Catalog screen (Admin, not project-scoped)
+  showCatalog: false,        // Materials Catalog screen (Admin, not project-scoped)
+  boqExpandedRows: {}        // BoqItemID -> true, rows manually switched to L x W x Depth entry
 };
 
 // A share link like ?project=P-001&role=client locks a visitor to that single
@@ -425,35 +430,21 @@ function delayedItems(projectId){
   });
   return out;
 }
-// "Remaining" = full Amount of any BOQ line not yet Delivered — the simplest
-// proxy for "still needs to be arranged" (once delivered, a material's cost
-// is essentially locked in regardless of what's technically been invoiced;
-// we don't track invoiced/received at all, that's the client's own books).
-function boqLineRemaining_(r){
-  var delivery = r.Stages.filter(function(s){return s.stage==='Delivery';})[0];
-  return (!delivery || delivery.status!=='Done') ? (Number(r.Amount)||0) : 0;
-}
 function projectCashSummary(projectId){
-  var rows = boqItemsOf(projectId);
-  var boq=0, remaining=0;
-  rows.forEach(function(r){ boq+=Number(r.Amount)||0; remaining+=boqLineRemaining_(r); });
-  return { boq:boq, remaining:remaining };
+  var boq=0;
+  boqItemsOf(projectId).forEach(function(r){ boq+=Number(r.Amount)||0; });
+  return { boq:boq };
 }
-// Remaining-to-arrange amount, grouped by Space then Category (matches the
-// original Excel takeoff sheet's own layout) — "how much to spend on what".
-function remainingBreakdown(projectId){
-  var bySpace = {};
+// Total BOQ value broken down by Category, project-wide — matches the
+// layout of the original Excel's Summary Sheet tab (Category -> Amount).
+function categoryBoqSummary(projectId){
+  var byCategory = {};
   boqItemsOf(projectId).forEach(function(r){
-    var amt = boqLineRemaining_(r);
-    if(!amt) return;
-    if(!bySpace[r.SpaceID]){
-      var sp = STATE.data.spaces.filter(function(s){return s.SpaceID===r.SpaceID;})[0];
-      bySpace[r.SpaceID] = { spaceId: r.SpaceID, name: sp?sp.Name:'', total: 0, byCategory: {} };
-    }
-    bySpace[r.SpaceID].total += amt;
-    bySpace[r.SpaceID].byCategory[r.Category] = (bySpace[r.SpaceID].byCategory[r.Category]||0) + amt;
+    byCategory[r.Category] = (byCategory[r.Category]||0) + (Number(r.Amount)||0);
   });
-  return Object.keys(bySpace).map(function(k){ return bySpace[k]; }).sort(function(a,b){ return b.total-a.total; });
+  return Object.keys(byCategory).map(function(cat){
+    return { category: cat, total: byCategory[cat] };
+  }).sort(function(a,b){ return b.total-a.total; });
 }
 function daysToMoveIn(project){
   if(!project.TargetMoveIn) return null;
@@ -711,12 +702,12 @@ function renderTrackerView(editable){
   var pid = STATE.currentProjectId;
   var spaces = spacesOf(pid);
   var schema = STATE.data.schema;
-  var html = '';
-  if(!editable){
-    html += filterBar();
+  var html = filterBar();
+  if(!STATE.filters.space){
+    return html + '<div class="empty-state">Select a space above to view its BOQ.</div>';
   }
   spaces.forEach(function(sp){
-    if(STATE.filters.space && STATE.filters.space!==sp.SpaceID) return;
+    if(STATE.filters.space!==sp.SpaceID) return;
     var rows = boqItemsOf(pid, sp.SpaceID).filter(function(r){
       if(STATE.filters.category && r.Category!==STATE.filters.category) return false;
       return true;
@@ -724,11 +715,12 @@ function renderTrackerView(editable){
     html += '<div class="space-block"><div class="space-head"><h3>'+escapeHtml(sp.Name)+'</h3>'+
       '<span class="badge ok">'+spacePct(pid, sp.SpaceID)+'% complete</span></div>';
     html += renderDesignRow(sp);
-    html += '<div class="table-wrap"><table class="tracker"><thead><tr><th>Material</th><th>Unit</th><th>Qty</th>';
+    html += '<div class="table-wrap"><table class="tracker"><thead><tr><th>Design</th><th>Material</th><th>Unit</th><th>Qty</th>';
     schema.materialStages.forEach(function(st){ html += '<th style="text-align:center">'+st+'</th>'; });
     html += '</tr></thead><tbody>';
+    var designChip = '<span class="status-chip '+rollupVisual(sp.Design||[], sp.DesignRollup||'Not Started')+'" style="font-size:10px;padding:2px 7px;white-space:nowrap;">'+escapeHtml(sp.DesignRollup||'Not Started')+'</span>';
     rows.forEach(function(r){
-      html += '<tr><td class="subitem-cell"><span class="cat">'+escapeHtml(r.Category)+'</span>'+escapeHtml(r.MaterialName)+
+      html += '<tr><td>'+designChip+'</td><td class="subitem-cell"><span class="cat">'+escapeHtml(r.Category)+'</span>'+escapeHtml(r.MaterialName)+
         '<span class="agency-chip">'+escapeHtml(r.Agency)+'</span></td>'+
         '<td>'+escapeHtml(r.Unit)+'</td><td>'+r.Quantity+'</td>';
       r.Stages.forEach(function(s){
@@ -806,8 +798,13 @@ function saveStage(boqItemId, stageName){
 }
 
 // ============================= ADD MATERIAL TO SPACE =============================
+// true = single "Quantity" field (count-style items); false = Length x Width
+// x Depth/Nos (measured items) — defaulted per-material in renderAmDetails,
+// user can always flip it via the link in amMeasurementHtml().
+var amDirectMode = true;
 function openAddMaterialModal(spaceId){
   var cats = STATE.data.schema.categories;
+  amDirectMode = true;
   var body = '<h3>Add Material</h3>'+
     '<div class="field"><label>Category</label><select id="am-cat" onchange="renderAmMaterialOptions()">'+
       cats.map(function(c){return '<option value="'+escapeHtml(c)+'">'+escapeHtml(c)+'</option>';}).join('')+
@@ -817,12 +814,7 @@ function openAddMaterialModal(spaceId){
       '<div class="field"><label>Unit</label><input id="am-unit" readonly></div>'+
       '<div class="field"><label>Agency</label><input id="am-agency" readonly></div>'+
     '</div>'+
-    '<div class="field-hint">Measurement (like your BoQ takeoff sheet) &mdash; Quantity = Length &times; Width &times; Depth/Nos. For a simple count item, leave Length &amp; Width at 1 and enter the count in Depth/Nos.</div>'+
-    '<div class="field-row">'+
-      '<div class="field"><label>Length</label><input type="number" id="am-length" value="1" min="0" step="any" oninput="renderAmAmount()"></div>'+
-      '<div class="field"><label>Width</label><input type="number" id="am-width" value="1" min="0" step="any" oninput="renderAmAmount()"></div>'+
-      '<div class="field"><label>Depth / Nos.</label><input type="number" id="am-depth" value="1" min="0" step="any" oninput="renderAmAmount()"></div>'+
-    '</div>'+
+    '<div id="am-measurement-wrap"></div>'+
     '<div class="field-row">'+
       '<div class="field"><label>Contingency Qty</label><input type="number" id="am-contingency" value="0" min="0" step="any" oninput="renderAmAmount()"></div>'+
       '<div class="field"><label>Revised Rate <span style="font-weight:400;">(optional)</span></label><input type="number" id="am-revrate" placeholder="Catalog rate: —" min="0" step="any" oninput="renderAmAmount()"></div>'+
@@ -832,6 +824,39 @@ function openAddMaterialModal(spaceId){
     '<button class="btn primary" onclick="saveAddMaterial(\''+spaceId+'\')">Add to BOQ</button></div>';
   showModal(body);
   renderAmMaterialOptions();
+}
+function amMeasurementHtml(){
+  if(amDirectMode){
+    return '<input type="number" id="am-length" value="1" style="display:none;">'+
+      '<input type="number" id="am-width" value="1" style="display:none;">'+
+      '<div class="field"><label>Quantity</label><input type="number" id="am-depth" value="1" min="0" step="any" oninput="renderAmAmount()"></div>'+
+      '<div class="field-hint"><a href="#" onclick="amToggleMode();return false;">Or enter as Length &times; Width &times; Depth</a></div>';
+  }
+  return '<div class="field-hint">Quantity = Length &times; Width &times; Depth/Nos. (like your BoQ takeoff sheet)</div>'+
+    '<div class="field-row">'+
+      '<div class="field"><label>Length</label><input type="number" id="am-length" value="1" min="0" step="any" oninput="renderAmAmount()"></div>'+
+      '<div class="field"><label>Width</label><input type="number" id="am-width" value="1" min="0" step="any" oninput="renderAmAmount()"></div>'+
+      '<div class="field"><label>Depth / Nos.</label><input type="number" id="am-depth" value="1" min="0" step="any" oninput="renderAmAmount()"></div>'+
+    '</div>'+
+    '<div class="field-hint"><a href="#" onclick="amToggleMode();return false;">Or enter total quantity directly</a></div>';
+}
+function amToggleMode(){
+  var length = Number(document.getElementById('am-length').value)||0;
+  var width = Number(document.getElementById('am-width').value)||0;
+  var depth = Number(document.getElementById('am-depth').value)||0;
+  var qty = length*width*depth;
+  amDirectMode = !amDirectMode;
+  document.getElementById('am-measurement-wrap').innerHTML = amMeasurementHtml();
+  if(amDirectMode){
+    document.getElementById('am-length').value = 1;
+    document.getElementById('am-width').value = 1;
+    document.getElementById('am-depth').value = qty || 1;
+  } else {
+    document.getElementById('am-length').value = length || 1;
+    document.getElementById('am-width').value = width || 1;
+    document.getElementById('am-depth').value = depth || 1;
+  }
+  renderAmAmount();
 }
 function renderAmMaterialOptions(){
   var cat = document.getElementById('am-cat').value;
@@ -847,6 +872,8 @@ function renderAmDetails(){
   document.getElementById('am-unit').value = mat ? mat.Unit : '';
   document.getElementById('am-agency').value = mat ? mat.Agency : '';
   document.getElementById('am-revrate').placeholder = 'Catalog rate: ' + (mat ? fmtMoney(mat.Rate) : '—');
+  amDirectMode = !mat || mat.Unit==='Nos.' || mat.Unit==='L.S.';
+  document.getElementById('am-measurement-wrap').innerHTML = amMeasurementHtml();
   renderAmAmount();
 }
 function renderAmAmount(){
@@ -1187,90 +1214,202 @@ function renderCashflowView(){
   var pid = STATE.currentProjectId;
   var cash = projectCashSummary(pid);
   var spaces = spacesOf(pid);
-  var breakdown = remainingBreakdown(pid);
-  var html = '<div class="stat-strip">'+
-    statBox('Total BOQ Value', fmtMoney(cash.boq))+
-    statBox('Remaining to Arrange', fmtMoney(cash.remaining), cash.remaining>0?'accent':'')+
-    '</div>';
+  var byCategory = categoryBoqSummary(pid);
+  var html = '<div class="stat-strip" id="boq-stat-strip">'+boqStatStripHtml(cash)+'</div>';
 
   spaces.forEach(function(sp){
     var rows = boqItemsOf(pid, sp.SpaceID);
     if(!rows.length) return;
     html += '<div class="section-title">'+escapeHtml(sp.Name)+'</div>';
     html += '<div class="table-wrap"><table class="tracker"><thead><tr>'+
-      '<th>Material</th><th>Unit</th><th>Measurement</th><th>Contingency</th><th>Qty</th><th>Rate</th><th>Amount</th>'+
-      '<th>Status</th><th></th></tr></thead><tbody>';
+      '<th>Material</th><th>Unit</th><th>Measurement</th><th>Contingency</th>'+
+      '<th>Qty</th><th>Rate</th><th>Amount</th><th>Status</th><th>Photos</th></tr></thead><tbody>';
     rows.forEach(function(r){
-      var hasRevised = r.RevisedRate!==''&&r.RevisedRate!==undefined&&r.RevisedRate!==null;
-      html += '<tr>'+
-        '<td>'+escapeHtml(r.MaterialName)+'</td>'+
-        '<td>'+escapeHtml(r.Unit)+'</td>'+
-        '<td style="font-size:11.5px;color:var(--ink-soft);">'+r.Length+'&times;'+r.Width+'&times;'+r.DepthNos+'</td>'+
-        '<td>'+(r.Contingency||0)+'</td>'+
-        '<td>'+r.Quantity+'</td>'+
-        '<td>'+fmtMoney(r.EffectiveRate)+(hasRevised?' <span style="text-decoration:line-through;color:var(--ink-soft);font-size:11px;">'+fmtMoney(r.Rate)+'</span>':'')+'</td>'+
-        '<td>'+fmtMoney(r.Amount)+'</td>'+
-        '<td><span class="status-chip '+rollupVisual(r.Stages, r.RollupStatus)+'">'+escapeHtml(r.RollupStatus)+'</span></td>'+
-        '<td><button class="btn small" onclick="openCashflowModal(\''+r.BoqItemID+'\')">Edit</button></td>'+
-        '</tr>';
+      html += boqRowHtml(r);
     });
     html += '</tbody></table></div>';
   });
   if(!cash.boq) html += '<div class="empty-state">No BOQ items yet — add materials in the Planning tab first.</div>';
 
-  if(breakdown.length){
-    html += '<div class="section-title">Remaining to Arrange <span style="font-weight:400;text-transform:none;letter-spacing:0;">— what\'s still owed, and for what</span></div>';
-    breakdown.forEach(function(sp){
-      html += '<div style="margin-bottom:12px;"><div style="font-weight:700;font-size:13.5px;">'+escapeHtml(sp.name)+' &mdash; '+fmtMoney(sp.total)+'</div>';
-      html += '<ul class="plain">'+Object.keys(sp.byCategory).sort().map(function(cat){
-        return '<li>'+escapeHtml(cat)+' &mdash; '+fmtMoney(sp.byCategory[cat])+'</li>';
-      }).join('')+'</ul></div>';
-    });
-  }
+  html += '<div id="boq-category-summary">'+boqCategorySummaryHtml(byCategory)+'</div>';
   return html;
 }
-function openCashflowModal(boqItemId){
-  var r = STATE.data.boqItems.filter(function(c){return c.BoqItemID===boqItemId;})[0];
-  var body = '<h3>'+escapeHtml(r.MaterialName)+' &mdash; BOQ</h3>'+
-    '<div class="field-hint">Quantity = Length &times; Width &times; Depth/Nos. For a simple count item, leave Length &amp; Width at 1 and enter the count in Depth/Nos.</div>'+
-    '<div class="field-row">'+
-      '<div class="field"><label>Length</label><input type="number" id="cf-length" value="'+(r.Length||0)+'" min="0" step="any" oninput="renderCfAmount()"></div>'+
-      '<div class="field"><label>Width</label><input type="number" id="cf-width" value="'+(r.Width||0)+'" min="0" step="any" oninput="renderCfAmount()"></div>'+
-      '<div class="field"><label>Depth / Nos.</label><input type="number" id="cf-depth" value="'+(r.DepthNos||0)+'" min="0" step="any" oninput="renderCfAmount()"></div>'+
-    '</div>'+
-    '<div class="field-row">'+
-      '<div class="field"><label>Contingency Qty</label><input type="number" id="cf-contingency" value="'+(r.Contingency||0)+'" min="0" step="any" oninput="renderCfAmount()"></div>'+
-      '<div class="field"><label>Rate <span style="font-weight:400;">(catalog: '+fmtMoney(r.Rate)+')</span></label><input type="number" id="cf-revrate" data-catalog-rate="'+(Number(r.Rate)||0)+'" value="'+(r.RevisedRate!==''&&r.RevisedRate!==undefined&&r.RevisedRate!==null?r.RevisedRate:'')+'" placeholder="'+fmtMoney(r.Rate)+'" min="0" step="any" oninput="renderCfAmount()"></div>'+
-    '</div>'+
-    '<div class="field-hint">Quantity: <b id="cf-qty-preview">'+r.Quantity+'</b> &middot; Amount: <b id="cf-amount">'+fmtMoney(r.Amount)+'</b></div>'+
-    '<div class="modal-actions"><button class="btn" onclick="closeModal()">Cancel</button>'+
-    '<button class="btn primary" onclick="saveCashflow(\''+boqItemId+'\')">Save</button></div>';
+function boqStatStripHtml(cash){
+  return statBox('Total BOQ Value', fmtMoney(cash.boq),'accent');
+}
+function boqCategorySummaryHtml(byCategory){
+  if(!byCategory.length) return '';
+  return '<div class="section-title">BOQ by Category</div>'+
+    '<ul class="plain">'+byCategory.map(function(c){
+      return '<li>'+escapeHtml(c.category)+' &mdash; '+fmtMoney(c.total)+'</li>';
+    }).join('')+'</ul>';
+}
+// A row shows a single Quantity field ("direct" mode) whenever Length and
+// Width are both 1 — true for count-style items (Nos./L.S., e.g. a sofa or
+// wall lamp) and for anything manually collapsed via the Qty link — and
+// three L x W x Depth/Nos fields otherwise. Toggling between the two never
+// loses the underlying quantity (collapsing folds L*W*D into DepthNos with
+// Length/Width reset to 1; expanding just changes which inputs are shown).
+function boqMeasurementCellHtml(r){
+  var isDirect = !STATE.boqExpandedRows[r.BoqItemID] && Number(r.Length)===1 && Number(r.Width)===1;
+  if(isDirect){
+    return '<div style="display:flex;align-items:center;gap:5px;">'+
+      '<input class="inline-edit" type="number" style="width:56px;" value="'+r.DepthNos+'" min="0" step="any" '+
+      'oninput="onBoqFieldInput(\''+r.BoqItemID+'\',\'depthNos\',this.value)" onchange="saveBoqField(\''+r.BoqItemID+'\',\'depthNos\',this.value)">'+
+      '<a href="#" onclick="boqExpandToMeasured(\''+r.BoqItemID+'\');return false;" style="font-size:10px;color:var(--ink-soft);white-space:nowrap;">L&times;W&times;D</a>'+
+      '</div>';
+  }
+  return '<div style="display:flex;align-items:center;gap:3px;">'+
+    '<input class="inline-edit" type="number" style="width:38px;" value="'+r.Length+'" min="0" step="any" title="Length" '+
+    'oninput="onBoqFieldInput(\''+r.BoqItemID+'\',\'length\',this.value)" onchange="saveBoqField(\''+r.BoqItemID+'\',\'length\',this.value)">'+
+    '<span style="color:var(--ink-soft);">&times;</span>'+
+    '<input class="inline-edit" type="number" style="width:38px;" value="'+r.Width+'" min="0" step="any" title="Width" '+
+    'oninput="onBoqFieldInput(\''+r.BoqItemID+'\',\'width\',this.value)" onchange="saveBoqField(\''+r.BoqItemID+'\',\'width\',this.value)">'+
+    '<span style="color:var(--ink-soft);">&times;</span>'+
+    '<input class="inline-edit" type="number" style="width:38px;" value="'+r.DepthNos+'" min="0" step="any" title="Depth/Nos" '+
+    'oninput="onBoqFieldInput(\''+r.BoqItemID+'\',\'depthNos\',this.value)" onchange="saveBoqField(\''+r.BoqItemID+'\',\'depthNos\',this.value)">'+
+    '<a href="#" onclick="boqCollapseToDirect(\''+r.BoqItemID+'\');return false;" style="font-size:10px;color:var(--ink-soft);white-space:nowrap;margin-left:2px;">Qty</a>'+
+    '</div>';
+}
+function boqRowHtml(r){
+  var revisedVal = (r.RevisedRate!==''&&r.RevisedRate!==undefined&&r.RevisedRate!==null) ? r.RevisedRate : '';
+  return '<tr id="boq-row-'+r.BoqItemID+'">'+
+    '<td>'+escapeHtml(r.MaterialName)+'</td>'+
+    '<td>'+escapeHtml(r.Unit)+'</td>'+
+    '<td>'+boqMeasurementCellHtml(r)+'</td>'+
+    '<td><input class="inline-edit" type="number" style="width:56px;" value="'+(r.Contingency||0)+'" min="0" step="any" oninput="onBoqFieldInput(\''+r.BoqItemID+'\',\'contingency\',this.value)" onchange="saveBoqField(\''+r.BoqItemID+'\',\'contingency\',this.value)"></td>'+
+    '<td id="boq-qty-'+r.BoqItemID+'">'+r.Quantity+'</td>'+
+    '<td><input class="inline-edit" type="number" style="width:76px;" placeholder="'+fmtMoney(r.Rate)+'" value="'+revisedVal+'" min="0" step="any" oninput="onBoqFieldInput(\''+r.BoqItemID+'\',\'revisedRate\',this.value)" onchange="saveBoqField(\''+r.BoqItemID+'\',\'revisedRate\',this.value)"></td>'+
+    '<td id="boq-amount-'+r.BoqItemID+'">'+fmtMoney(r.Amount)+'</td>'+
+    '<td><span class="status-chip '+rollupVisual(r.Stages, r.RollupStatus)+'">'+escapeHtml(r.RollupStatus)+'</span></td>'+
+    '<td><button class="btn small" id="boq-photos-btn-'+r.BoqItemID+'" onclick="openBoqImagesModal(\''+r.BoqItemID+'\')">'+boqPhotosBtnLabel(r)+'</button></td>'+
+    '</tr>';
+}
+function rerenderBoqRow_(r){
+  var tr = document.getElementById('boq-row-'+r.BoqItemID);
+  if(!tr) return;
+  var temp = document.createElement('tbody');
+  temp.innerHTML = boqRowHtml(r);
+  tr.replaceWith(temp.firstElementChild);
+}
+function boqExpandToMeasured(boqItemId){
+  STATE.boqExpandedRows[boqItemId] = true;
+  var r = STATE.data.boqItems.filter(function(x){return x.BoqItemID===boqItemId;})[0];
+  if(r) rerenderBoqRow_(r);
+}
+function boqCollapseToDirect(boqItemId){
+  var r = STATE.data.boqItems.filter(function(x){return x.BoqItemID===boqItemId;})[0];
+  if(!r) return;
+  var qty = (Number(r.Length)||0)*(Number(r.Width)||0)*(Number(r.DepthNos)||0);
+  delete STATE.boqExpandedRows[boqItemId];
+  r.Length = 1; r.Width = 1; r.DepthNos = qty||1;
+  boqRowRecompute_(r);
+  rerenderBoqRow_(r);
+  var qtyEl = document.getElementById('boq-qty-'+boqItemId);
+  var amtEl = document.getElementById('boq-amount-'+boqItemId);
+  if(qtyEl) qtyEl.textContent = r.Quantity;
+  if(amtEl) amtEl.textContent = fmtMoney(r.Amount);
+  apiPost('updateBoqItem', { boqItemId: boqItemId, length: 1, width: 1, depthNos: r.DepthNos }).catch(function(err){ showErr(err); refresh(); });
+}
+function boqRowRecompute_(r){
+  var qty = (Number(r.Length)||0)*(Number(r.Width)||0)*(Number(r.DepthNos)||0) + (Number(r.Contingency)||0);
+  var effRate = (r.RevisedRate!==''&&r.RevisedRate!==undefined&&r.RevisedRate!==null) ? (Number(r.RevisedRate)||0) : (Number(r.Rate)||0);
+  r.Quantity = qty; r.EffectiveRate = effRate; r.Amount = qty*effRate;
+}
+function onBoqFieldInput(boqItemId, field, value){
+  var r = STATE.data.boqItems.filter(function(x){return x.BoqItemID===boqItemId;})[0];
+  if(!r) return;
+  var keyMap = { length:'Length', width:'Width', depthNos:'DepthNos', contingency:'Contingency', revisedRate:'RevisedRate' };
+  r[keyMap[field]] = (field==='revisedRate' && value==='') ? '' : (Number(value)||0);
+  boqRowRecompute_(r);
+  var qtyEl = document.getElementById('boq-qty-'+boqItemId);
+  var amtEl = document.getElementById('boq-amount-'+boqItemId);
+  if(qtyEl) qtyEl.textContent = r.Quantity;
+  if(amtEl) amtEl.textContent = fmtMoney(r.Amount);
+  var stripEl = document.getElementById('boq-stat-strip');
+  if(stripEl) stripEl.innerHTML = boqStatStripHtml(projectCashSummary(STATE.currentProjectId));
+  var catEl = document.getElementById('boq-category-summary');
+  if(catEl) catEl.innerHTML = boqCategorySummaryHtml(categoryBoqSummary(STATE.currentProjectId));
+}
+function saveBoqField(boqItemId, field, value){
+  onBoqFieldInput(boqItemId, field, value);
+  var payload = { boqItemId: boqItemId };
+  payload[field] = value;
+  apiPost('updateBoqItem', payload).catch(function(err){ showErr(err); refresh(); });
+}
+
+// ============================= BOQ REFERENCE IMAGES (Google Drive) =============================
+function boqPhotosBtnLabel(r){
+  return (r.Images && r.Images.length) ? ('📷 '+r.Images.length) : '+ Photo';
+}
+function openBoqImagesModal(boqItemId){
+  var r = STATE.data.boqItems.filter(function(x){return x.BoqItemID===boqItemId;})[0];
+  var body = '<h3>'+escapeHtml(r.MaterialName)+' &mdash; Reference Images</h3>'+
+    '<div id="boq-img-grid" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;">'+boqImageGridHtml(r)+'</div>'+
+    '<div class="field"><label>Add Image</label><input type="file" id="boq-img-file" accept="image/*" onchange="uploadBoqImage(\''+boqItemId+'\')"></div>'+
+    '<div class="field-hint" id="boq-img-status"></div>'+
+    '<div class="modal-actions"><button class="btn" onclick="closeModal()">Close</button></div>';
   showModal(body);
 }
-function renderCfAmount(){
-  var length = Number(document.getElementById('cf-length').value)||0;
-  var width = Number(document.getElementById('cf-width').value)||0;
-  var depth = Number(document.getElementById('cf-depth').value)||0;
-  var contingency = Number(document.getElementById('cf-contingency').value)||0;
-  var revRateEl = document.getElementById('cf-revrate');
-  var revRateRaw = revRateEl.value;
-  var catalogRate = Number(revRateEl.dataset.catalogRate)||0;
-  var rate = revRateRaw!=='' ? Number(revRateRaw)||0 : catalogRate;
-  var qty = length*width*depth + contingency;
-  document.getElementById('cf-qty-preview').textContent = qty;
-  document.getElementById('cf-amount').textContent = fmtMoney(qty*rate);
+function boqImageGridHtml(r){
+  var images = r.Images||[];
+  if(!images.length) return '<div style="color:var(--ink-soft);font-size:12.5px;">No images yet.</div>';
+  return images.map(function(im){
+    var thumbUrl = 'https://drive.google.com/thumbnail?id='+encodeURIComponent(im.fileId)+'&sz=w400';
+    var viewUrl = 'https://drive.google.com/file/d/'+encodeURIComponent(im.fileId)+'/view';
+    return '<div style="position:relative;">'+
+      '<a href="'+viewUrl+'" target="_blank" rel="noopener">'+
+      '<img src="'+thumbUrl+'" style="width:90px;height:90px;object-fit:cover;border-radius:6px;border:1px solid var(--line);display:block;" alt="'+escapeHtml(im.name||'reference image')+'"></a>'+
+      '<button onclick="deleteBoqImage(\''+r.BoqItemID+'\',\''+im.fileId+'\')" title="Remove" '+
+      'style="position:absolute;top:-6px;right:-6px;width:20px;height:20px;border-radius:50%;background:var(--vs-red);color:#fff;border:none;cursor:pointer;font-size:12px;line-height:1;">&times;</button>'+
+      '</div>';
+  }).join('');
 }
-function saveCashflow(boqItemId){
-  var payload = {
-    boqItemId: boqItemId,
-    length: document.getElementById('cf-length').value,
-    width: document.getElementById('cf-width').value,
-    depthNos: document.getElementById('cf-depth').value,
-    contingency: document.getElementById('cf-contingency').value,
-    revisedRate: document.getElementById('cf-revrate').value
+function refreshBoqImageUi(boqItemId, images){
+  var r = STATE.data.boqItems.filter(function(x){return x.BoqItemID===boqItemId;})[0];
+  if(r) r.Images = images;
+  var grid = document.getElementById('boq-img-grid');
+  if(grid && r) grid.innerHTML = boqImageGridHtml(r);
+  var btn = document.getElementById('boq-photos-btn-'+boqItemId);
+  if(btn && r) btn.textContent = boqPhotosBtnLabel(r);
+}
+function uploadBoqImage(boqItemId){
+  var fileInput = document.getElementById('boq-img-file');
+  var file = fileInput.files[0];
+  if(!file) return;
+  if(file.size > 15*1024*1024){ toast('Image too large (max 15MB)'); fileInput.value=''; return; }
+  var statusEl = document.getElementById('boq-img-status');
+  if(statusEl) statusEl.textContent = 'Uploading…';
+  var reader = new FileReader();
+  reader.onload = function(e){
+    var img = new Image();
+    img.onload = function(){
+      var maxDim = 1600;
+      var scale = Math.min(1, maxDim/Math.max(img.width, img.height));
+      var w = Math.max(1, Math.round(img.width*scale)), h = Math.max(1, Math.round(img.height*scale));
+      var canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      var dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+      var base64 = dataUrl.split(',')[1];
+      apiPost('addBoqImage', {
+        boqItemId: boqItemId, projectId: STATE.currentProjectId,
+        filename: file.name.replace(/\.[^.]+$/,'')+'.jpg', mimeType: 'image/jpeg', dataBase64: base64
+      }).then(function(res){
+        refreshBoqImageUi(boqItemId, res.images);
+        if(statusEl) statusEl.textContent = '';
+        fileInput.value = '';
+        toast('Image added');
+      }).catch(function(err){ if(statusEl) statusEl.textContent=''; showErr(err); });
+    };
+    img.onerror = function(){ if(statusEl) statusEl.textContent=''; toast('Could not read that image'); };
+    img.src = e.target.result;
   };
-  apiPost('updateBoqItem', payload).then(function(){
-    closeModal(); toast('Saved'); refresh();
+  reader.readAsDataURL(file);
+}
+function deleteBoqImage(boqItemId, fileId){
+  apiPost('removeBoqImage', { boqItemId: boqItemId, fileId: fileId }).then(function(res){
+    refreshBoqImageUi(boqItemId, res.images);
   }).catch(showErr);
 }
 
@@ -1314,21 +1453,47 @@ function activitiesActiveOn(spaceId, date){
     return a.SpaceID===spaceId && a.Status!=='Done' && a.StartDate<=date;
   });
 }
+// Design stages progress 2D -> 3D -> WD in order; the daily log only ever
+// offers to finalize the single next one, matching how design actually
+// advances.
+function nextPendingDesignStage(sp){
+  var design = sp&&sp.Design||[];
+  return design.filter(function(d){ return d.status!=='Done'; })[0] || null;
+}
+function renderDailyDesignSection(sp){
+  if(!sp) return '';
+  var pending = nextPendingDesignStage(sp);
+  var chips = (sp.Design||[]).map(function(d){
+    var vis = deriveVisual(d.status, d.originalTarget, d.target);
+    return '<span class="status-chip '+vis.cls+'" style="font-size:10px;padding:2px 7px;">'+escapeHtml(d.stage)+': '+escapeHtml(d.status)+'</span>';
+  }).join(' ');
+  return '<div class="card" style="padding:10px 12px;margin-bottom:8px;">'+
+    '<div style="font-weight:700;font-size:13px;margin-bottom:6px;">Design</div>'+
+    '<div style="display:flex;gap:6px;flex-wrap:wrap;'+(pending?'margin-bottom:8px;':'')+'">'+chips+'</div>'+
+    (pending ? '<label style="display:flex;align-items:center;gap:7px;font-weight:400;font-size:13px;margin:0;">'+
+      '<input type="checkbox" id="dl-design-done" style="width:auto;" data-stage="'+escapeHtml(pending.stage)+'"> Mark \''+escapeHtml(pending.stage)+'\' finalized today</label>' : '')+
+    '</div>';
+}
 function renderDailyActivityRows(){
   var container = document.getElementById('dl-activity-rows');
   if(!container) return;
   var spaceId = document.getElementById('dl-space').value;
   var date = document.getElementById('dl-date').value || todayISO();
   var acts = spaceId ? activitiesActiveOn(spaceId, date) : [];
+  var sp = spaceId ? STATE.data.spaces.filter(function(s){return s.SpaceID===spaceId;})[0] : null;
+  var designHtml = renderDailyDesignSection(sp);
 
   if(!acts.length){
-    container.innerHTML = '<div class="field"><label>What got done today / blockers</label>'+
+    container.innerHTML = designHtml + '<div class="field"><label>What got done today / blockers</label>'+
       '<textarea id="dl-entry" placeholder="'+(spaceId ? 'No scheduled activities for this date — describe what happened...' : 'e.g. Flooring grouting completed in living area, kitchen tile delivery delayed...')+'"></textarea></div>';
     return;
   }
 
-  var html = '<div class="field-hint" style="margin-bottom:8px;">Activities scheduled for this space as of '+fmtDate(date)+' &mdash; update each:</div>';
+  var html = designHtml + '<div class="field-hint" style="margin-bottom:8px;">Activities scheduled for this space as of '+fmtDate(date)+' &mdash; update each:</div>';
   acts.forEach(function(a){
+    var hasPendingOrder = boqItemsOf(STATE.currentProjectId, spaceId).some(function(r){
+      return r.Agency===a.Agency && r.Stages.some(function(s){ return s.stage==='Order Placement' && s.status!=='Done'; });
+    });
     html += '<div class="card" style="padding:10px 12px;margin-bottom:8px;">'+
       '<div style="font-weight:700;font-size:13px;margin-bottom:6px;">'+escapeHtml(a.Agency)+'</div>'+
       '<div class="field-row">'+
@@ -1340,7 +1505,9 @@ function renderDailyActivityRows(){
         '</select></div>'+
         '<div class="field" style="margin-bottom:6px;"><label>% Complete</label><input type="number" class="dl-act-percent" data-activity-id="'+a.ActivityID+'" min="0" max="100" value="'+(a.PercentComplete||0)+'"></div>'+
       '</div>'+
-      '<div class="field" style="margin-bottom:0;"><label>Expected End Date</label><input type="date" class="dl-act-end" data-activity-id="'+a.ActivityID+'" value="'+a.EndDate+'"></div>'+
+      '<div class="field" style="margin-bottom:'+(hasPendingOrder?'6px':'0')+';"><label>Expected End Date</label><input type="date" class="dl-act-end" data-activity-id="'+a.ActivityID+'" value="'+a.EndDate+'"></div>'+
+      (hasPendingOrder ? '<label style="display:flex;align-items:center;gap:7px;font-weight:400;font-size:13px;margin:0;">'+
+        '<input type="checkbox" class="dl-act-orderplaced" data-activity-id="'+a.ActivityID+'" style="width:auto;"> Order Placement done for '+escapeHtml(a.Agency)+' materials today</label>' : '')+
       '</div>';
   });
   html += '<div class="field"><label>Additional notes (optional)</label><textarea id="dl-notes" placeholder="Anything else worth flagging..."></textarea></div>';
@@ -1355,18 +1522,21 @@ function submitDailyLog(){
   var spaceId = document.getElementById('dl-space').value;
   var hasBlocker = document.getElementById('dl-blocker').checked;
   var statusEls = document.querySelectorAll('.dl-act-status');
+  var designEl = document.getElementById('dl-design-done');
+  var designStageDone = (designEl && designEl.checked) ? designEl.dataset.stage : '';
 
-  if(statusEls.length){
+  if(statusEls.length || designStageDone){
     var updates = Array.from(statusEls).map(function(sel){
       var id = sel.dataset.activityId;
       var percentEl = document.querySelector('.dl-act-percent[data-activity-id="'+id+'"]');
       var endEl = document.querySelector('.dl-act-end[data-activity-id="'+id+'"]');
-      return { activityId: id, status: sel.value, endDate: endEl.value, percentComplete: Number(percentEl.value)||0 };
+      var orderEl = document.querySelector('.dl-act-orderplaced[data-activity-id="'+id+'"]');
+      return { activityId: id, status: sel.value, endDate: endEl.value, percentComplete: Number(percentEl.value)||0, orderPlacementDone: !!(orderEl&&orderEl.checked) };
     });
     var notesEl = document.getElementById('dl-notes');
     apiPost('submitActivityUpdates', {
       date: date, projectId: STATE.currentProjectId, spaceId: spaceId, loggedBy: by,
-      hasBlocker: hasBlocker, notes: notesEl?notesEl.value.trim():'', updates: updates
+      hasBlocker: hasBlocker, notes: notesEl?notesEl.value.trim():'', designStageDone: designStageDone, updates: updates
     }).then(function(){
       toast('Logged'); refresh();
     }).catch(showErr);
@@ -1423,7 +1593,6 @@ function renderReportView(){
   var procurement = pendingProcurement(pid);
   var agencies = delayedAgencies(pid);
   var critical = computeCriticalPath(pid);
-  var cash = projectCashSummary(pid);
   var weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate()-7);
   var completions = [];
   boqItemsOf(pid).forEach(function(r){
@@ -1454,8 +1623,7 @@ function renderReportView(){
   html += '<div class="stat-strip"><div class="stat-box"><div class="label">Delayed Items</div><div class="value '+(delayed.length?'red':'')+'">'+delayed.length+'</div></div>'+
     '<div class="stat-box"><div class="label">Pending Procurement</div><div class="value '+(procurement.length?'accent':'')+'">'+procurement.length+'</div></div>'+
     '<div class="stat-box"><div class="label">Agencies Running Late</div><div class="value '+(agencies.length?'red':'')+'">'+agencies.length+'</div></div>'+
-    '<div class="stat-box"><div class="label">Critical Path Length</div><div class="value">'+critical.length+'</div></div>'+
-    '<div class="stat-box"><div class="label">Remaining to Arrange</div><div class="value">'+fmtMoney(cash.remaining)+'</div></div></div>';
+    '<div class="stat-box"><div class="label">Critical Path Length</div><div class="value">'+critical.length+'</div></div></div>';
 
   html += '<div class="section-title">This Week\'s Completions</div>';
   html += completions.length ? '<ul class="plain">'+completions.map(function(c){return '<li>'+c+'</li>';}).join('')+'</ul>' : '<p style="color:var(--ink-soft);font-size:13px;">No stage completions logged in the last 7 days.</p>';
@@ -1557,22 +1725,36 @@ function addSpaceToProject(){
 // ============================= MATERIALS CATALOG (Admin, global) =============================
 function renderMaterialsCatalogView(){
   var mats = STATE.data.materialsConfig;
+  var agencies = STATE.data.schema.agencies;
   var byCat = {};
   mats.forEach(function(m){ (byCat[m.Category]=byCat[m.Category]||[]).push(m); });
   var html = '<div class="toolbar-row"><button class="btn" onclick="closeCatalog()">&larr; Back to Projects</button>'+
     '<button class="btn primary" onclick="openAddMaterialToCatalogModal()">+ Add Material</button></div>';
-  html += '<div class="section-title">Materials Catalog<span style="font-weight:400;text-transform:none;letter-spacing:0;">'+mats.length+' materials, shared across all projects</span></div>';
+  html += '<div class="section-title">Materials Catalog<span style="font-weight:400;text-transform:none;letter-spacing:0;">'+mats.length+' materials, shared across all projects &mdash; click any field to edit</span></div>';
   Object.keys(byCat).sort().forEach(function(cat){
     html += '<div class="table-wrap" style="margin-bottom:14px;"><table class="tracker"><thead><tr>'+
-      '<th>'+escapeHtml(cat)+'</th><th>Unit</th><th>Rate</th><th>Agency</th><th></th></tr></thead><tbody>';
+      '<th>'+escapeHtml(cat)+'</th><th>Unit</th><th>Rate</th><th>Agency</th></tr></thead><tbody>';
     byCat[cat].forEach(function(m){
-      html += '<tr><td>'+escapeHtml(m.Name)+'</td><td>'+escapeHtml(m.Unit)+'</td><td>'+fmtMoney(m.Rate)+'</td>'+
-        '<td><span class="agency-chip">'+escapeHtml(m.Agency)+'</span></td>'+
-        '<td><button class="btn small" onclick="openEditMaterialModal(\''+m.MaterialID+'\')">Edit</button></td></tr>';
+      html += '<tr>'+
+        '<td><input class="inline-edit" value="'+escapeHtml(m.Name)+'" onchange="saveMaterialField(\''+m.MaterialID+'\',\'name\',this.value)"></td>'+
+        '<td><input class="inline-edit" style="width:70px;" value="'+escapeHtml(m.Unit)+'" onchange="saveMaterialField(\''+m.MaterialID+'\',\'unit\',this.value)"></td>'+
+        '<td><input class="inline-edit" type="number" style="width:80px;" value="'+(m.Rate||0)+'" onchange="saveMaterialField(\''+m.MaterialID+'\',\'rate\',this.value)"></td>'+
+        '<td><select class="inline-edit" onchange="saveMaterialField(\''+m.MaterialID+'\',\'agency\',this.value)">'+
+          agencies.map(function(a){return '<option '+(m.Agency===a?'selected':'')+'>'+escapeHtml(a)+'</option>';}).join('')+
+        '</select></td>'+
+        '</tr>';
     });
     html += '</tbody></table></div>';
   });
   return html;
+}
+function saveMaterialField(materialId, field, value){
+  var m = STATE.data.materialsConfig.filter(function(x){return x.MaterialID===materialId;})[0];
+  if(!m) return;
+  m[field.charAt(0).toUpperCase()+field.slice(1)] = field==='rate' ? Number(value)||0 : value;
+  var payload = { materialId: materialId };
+  payload[field] = value;
+  apiPost('updateMaterial', payload).catch(function(err){ showErr(err); refresh(); });
 }
 function materialFormBody(title, m){
   var agencies = STATE.data.schema.agencies;
@@ -1606,26 +1788,6 @@ function saveNewMaterial(){
     closeModal(); toast('Material added'); refresh();
   }).catch(showErr);
 }
-function openEditMaterialModal(materialId){
-  var m = STATE.data.materialsConfig.filter(function(x){return x.MaterialID===materialId;})[0];
-  var body = materialFormBody('Edit Material', m)+
-    '<div class="modal-actions"><button class="btn" onclick="closeModal()">Cancel</button>'+
-    '<button class="btn primary" onclick="saveEditMaterial(\''+materialId+'\')">Save</button></div>';
-  showModal(body);
-}
-function saveEditMaterial(materialId){
-  var payload = {
-    materialId: materialId,
-    category: document.getElementById('mt-cat').value.trim(),
-    name: document.getElementById('mt-name').value.trim(),
-    unit: document.getElementById('mt-unit').value.trim(),
-    rate: document.getElementById('mt-rate').value,
-    agency: document.getElementById('mt-agency').value
-  };
-  apiPost('updateMaterial', payload).then(function(){
-    closeModal(); toast('Material updated'); refresh();
-  }).catch(showErr);
-}
 
 // ============================= CLIENT VIEW =============================
 function renderClientView(){
@@ -1645,13 +1807,13 @@ function renderClientView(){
     '</div>';
 
   var cash = projectCashSummary(pid);
-  if(cash.remaining>0){
-    var breakdown = remainingBreakdown(pid);
-    html += '<div class="card" style="margin-bottom:18px;"><h3>Funds Needed to Complete</h3>'+
-      '<div style="font-size:22px;font-weight:800;margin-bottom:8px;">'+fmtMoney(cash.remaining)+'</div>'+
-      '<div style="font-size:12px;color:var(--ink-soft);margin-bottom:10px;">To complete all remaining work &mdash; here\'s what it\'s for:</div>'+
-      '<ul class="plain">'+breakdown.slice(0,6).map(function(sp){
-        return '<li>'+escapeHtml(sp.name)+' &mdash; '+fmtMoney(sp.total)+'</li>';
+  var byCategory = categoryBoqSummary(pid);
+  if(cash.boq>0){
+    html += '<div class="card" style="margin-bottom:18px;"><h3>Budget Overview</h3>'+
+      '<div style="font-size:22px;font-weight:800;margin-bottom:8px;">'+fmtMoney(cash.boq)+'</div>'+
+      '<div style="font-size:12px;color:var(--ink-soft);margin-bottom:10px;">Total BOQ value, by category:</div>'+
+      '<ul class="plain">'+byCategory.slice(0,8).map(function(c){
+        return '<li>'+escapeHtml(c.category)+' &mdash; '+fmtMoney(c.total)+'</li>';
       }).join('')+'</ul></div>';
   }
 
