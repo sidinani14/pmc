@@ -1087,7 +1087,7 @@ function openActivityModal(activityId){
     }).join('') : '<div class="field-hint">No other activities in this project yet.</div>')+
     '</div>'+
     '<div class="modal-actions"><button class="btn" onclick="closeModal()">Cancel</button>'+
-    '<button class="btn primary" onclick="saveActivity(\''+activityId+'\')">Save</button></div>';
+    '<button class="btn primary" id="act-save-btn" onclick="saveActivity(\''+activityId+'\')">Save</button></div>';
   showModal(body);
 }
 function syncActEndFromDuration(){
@@ -1113,12 +1113,26 @@ function saveActivity(activityId){
     percentComplete: Number(document.getElementById('act-percent').value)||0,
     delayReason: reasonEl ? reasonEl.value : ''
   };
-  var deps = Array.from(document.querySelectorAll('.act-dep-cb:checked')).map(function(cb){return cb.value;});
-  apiPost('updateActivity', payload).then(function(){
-    return apiPost('setActivityDependencies', { activityId: activityId, predecessors: deps });
-  }).then(function(){
+  var deps = Array.from(document.querySelectorAll('.act-dep-cb:checked')).map(function(cb){return cb.value;}).sort();
+  var act = STATE.data.activities.filter(function(a){return a.ActivityID===activityId;})[0];
+  var currentDeps = ((act&&act.Predecessors)||[]).slice().sort();
+  var depsChanged = JSON.stringify(deps) !== JSON.stringify(currentDeps);
+
+  var btn = document.getElementById('act-save-btn');
+  if(btn){ btn.disabled = true; btn.textContent = 'Saving…'; }
+
+  var chain = apiPost('updateActivity', payload);
+  if(depsChanged){
+    chain = chain.then(function(){
+      return apiPost('setActivityDependencies', { activityId: activityId, predecessors: deps });
+    });
+  }
+  chain.then(function(){
     closeModal(); toast('Activity updated'); refresh();
-  }).catch(showErr);
+  }).catch(function(err){
+    if(btn){ btn.disabled = false; btn.textContent = 'Save'; }
+    showErr(err);
+  });
 }
 
 // ============================= CASH FLOW =============================
