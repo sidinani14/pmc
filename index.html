@@ -139,6 +139,13 @@
     color:inherit;padding:3px 4px;border-radius:4px;width:100%;min-width:0;}
   input.inline-edit:hover, select.inline-edit:hover{border-color:var(--line);}
   input.inline-edit:focus, select.inline-edit:focus{border-color:var(--accent);background:#fff;outline:none;}
+  /* Number spinner arrows are a liability in these small cells — a stray
+     scroll or misclick nudges the value without the user noticing. */
+  input.inline-edit[type=number]{-moz-appearance:textfield;appearance:textfield;}
+  input.inline-edit[type=number]::-webkit-outer-spin-button,
+  input.inline-edit[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
+  .rate-prefix{display:flex;align-items:center;gap:2px;}
+  .rate-prefix span{color:var(--ink-soft);font-size:11px;flex-shrink:0;}
   .stage-cell{width:44px;height:26px;border-radius:6px;cursor:pointer;border:1px solid transparent;
     display:flex;align-items:center;justify-content:center;position:relative;}
   .stage-cell.vs-green{background:var(--vs-green);}
@@ -735,14 +742,19 @@ function renderTrackerView(editable){
     html += '<div class="space-block"><div class="space-head"><h3>'+escapeHtml(sp.Name)+'</h3>'+
       '<span class="badge ok">'+spacePct(pid, sp.SpaceID)+'% complete</span></div>';
     html += renderDesignRow(sp);
-    html += '<div class="table-wrap"><table class="tracker"><thead><tr><th>Design</th><th>Material</th><th>Unit</th><th>Qty</th>';
+    html += '<div class="table-wrap"><table class="tracker"><thead><tr><th>Material</th><th>Unit</th><th>Qty</th>';
+    (sp.Design||[]).forEach(function(d){ html += '<th style="text-align:center">'+escapeHtml(d.stage)+'</th>'; });
     schema.materialStages.forEach(function(st){ html += '<th style="text-align:center">'+st+'</th>'; });
     html += '</tr></thead><tbody>';
-    var designChip = '<span class="status-chip '+rollupVisual(sp.Design||[], sp.DesignRollup||'Not Started')+'" style="font-size:10px;padding:2px 7px;white-space:nowrap;">'+escapeHtml(sp.DesignRollup||'Not Started')+'</span>';
     rows.forEach(function(r){
-      html += '<tr><td>'+designChip+'</td><td class="subitem-cell"><span class="cat">'+escapeHtml(r.Category)+'</span>'+escapeHtml(r.MaterialName)+
+      html += '<tr><td class="subitem-cell"><span class="cat">'+escapeHtml(r.Category)+'</span>'+escapeHtml(r.MaterialName)+
         '<span class="agency-chip">'+escapeHtml(r.Agency)+'</span></td>'+
         '<td>'+escapeHtml(r.Unit)+'</td><td>'+r.Quantity+'</td>';
+      (sp.Design||[]).forEach(function(d){
+        var vis = deriveVisual(d.status, d.originalTarget, d.target);
+        var title = 'Design '+d.stage+': '+d.status+(vis.delayed?' (delayed)':'')+(d.target? ' · target '+fmtDate(d.target):'')+(d.delayReason?' · '+d.delayReason:'')+(d.note? ' · '+d.note:'');
+        html += '<td style="text-align:center"><div class="stage-cell '+vis.cls+'" title="'+escapeHtml(title)+'" onclick="openDesignStageModal(\''+sp.SpaceID+'\',\''+d.stage+'\')"></div></td>';
+      });
       r.Stages.forEach(function(s){
         var vis = deriveVisual(s.status, s.originalTarget, s.target);
         var title = s.stage+': '+s.status+(vis.delayed?' (delayed)':'')+(s.target? ' · target '+fmtDate(s.target):'')+(s.delayReason?' · '+s.delayReason:'')+(s.note? ' · '+s.note:'');
@@ -1311,7 +1323,7 @@ function boqRowHtml(r){
     '<td>'+boqMeasurementCellHtml(r)+'</td>'+
     '<td><input class="inline-edit" type="number" style="width:56px;" value="'+(r.Contingency||0)+'" min="0" step="any" oninput="onBoqFieldInput(\''+r.BoqItemID+'\',\'contingency\',this.value)" onchange="saveBoqField(\''+r.BoqItemID+'\',\'contingency\',this.value)"></td>'+
     '<td id="boq-qty-'+r.BoqItemID+'">'+r.Quantity+'</td>'+
-    '<td><input class="inline-edit" type="number" style="width:76px;" placeholder="'+fmtMoney(r.Rate)+'" value="'+revisedVal+'" min="0" step="any" oninput="onBoqFieldInput(\''+r.BoqItemID+'\',\'revisedRate\',this.value)" onchange="saveBoqField(\''+r.BoqItemID+'\',\'revisedRate\',this.value)"></td>'+
+    '<td><div class="rate-prefix"><span>&#8377;</span><input class="inline-edit" type="number" style="width:70px;" placeholder="'+(Number(r.Rate)||0).toLocaleString('en-IN')+'" value="'+revisedVal+'" min="0" step="any" oninput="onBoqFieldInput(\''+r.BoqItemID+'\',\'revisedRate\',this.value)" onchange="saveBoqField(\''+r.BoqItemID+'\',\'revisedRate\',this.value)"></div></td>'+
     '<td id="boq-amount-'+r.BoqItemID+'">'+fmtMoney(r.Amount)+'</td>'+
     '<td><span class="status-chip '+rollupVisual(r.Stages, r.RollupStatus)+'">'+escapeHtml(r.RollupStatus)+'</span></td>'+
     '<td><button class="btn small" id="boq-photos-btn-'+r.BoqItemID+'" onclick="openBoqImagesModal(\''+r.BoqItemID+'\')">'+boqPhotosBtnLabel(r)+'</button></td>'+
@@ -1810,7 +1822,7 @@ function renderMaterialsCatalogView(){
           (taxonomy[cat]||[]).map(function(sc){return '<option '+(m.Subcategory===sc?'selected':'')+'>'+escapeHtml(sc)+'</option>';}).join('')+
         '</select></td>'+
         '<td><input class="inline-edit" style="width:70px;" value="'+escapeHtml(m.Unit)+'" onchange="saveMaterialField(\''+m.MaterialID+'\',\'unit\',this.value)"></td>'+
-        '<td><input class="inline-edit" type="number" style="width:80px;" value="'+(m.Rate||0)+'" onchange="saveMaterialField(\''+m.MaterialID+'\',\'rate\',this.value)"></td>'+
+        '<td><div class="rate-prefix"><span>&#8377;</span><input class="inline-edit" type="number" style="width:75px;" value="'+(m.Rate||0)+'" onchange="saveMaterialField(\''+m.MaterialID+'\',\'rate\',this.value)"></div></td>'+
         '<td><select class="inline-edit" onchange="saveMaterialField(\''+m.MaterialID+'\',\'agency\',this.value)">'+
           agencies.map(function(a){return '<option '+(m.Agency===a?'selected':'')+'>'+escapeHtml(a)+'</option>';}).join('')+
         '</select></td>'+
