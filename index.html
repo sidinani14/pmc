@@ -303,10 +303,27 @@ var STATE = {
   var params = new URLSearchParams(window.location.search);
   var role = params.get('role');
   var project = params.get('project');
+  var tab = params.get('tab');
   if(role && ['engineer','admin','client'].indexOf(role)>-1) STATE.role = role;
   if(project) STATE.currentProjectId = project;
+  if(tab) STATE.currentTab = tab;
+  if(params.get('catalog')==='1') STATE.showCatalog = true;
   if(role==='client' && project) STATE.locked = true;
 })();
+// Keeps the address bar in sync with in-app navigation (project/tab/role) so
+// a refresh (or a bookmark) lands back where the user actually was, instead
+// of always reloading to the project-list screen. A share link's URL is left
+// exactly as shared, untouched, once locked.
+function syncUrl(){
+  if(STATE.locked) return;
+  var params = new URLSearchParams();
+  if(STATE.role !== 'admin') params.set('role', STATE.role);
+  if(STATE.currentProjectId) params.set('project', STATE.currentProjectId);
+  if(STATE.currentTab) params.set('tab', STATE.currentTab);
+  if(STATE.showCatalog) params.set('catalog', '1');
+  var qs = params.toString();
+  history.replaceState(null, '', window.location.pathname + (qs ? '?'+qs : ''));
+}
 
 var STATUS_LIST = ['Not Started','In Progress','Done','N/A'];
 // Execution-stage status vocabulary (Phase 8) — matches Code.js's
@@ -375,7 +392,6 @@ function apiPost(action, payload){
 function boot(){
   apiGet('getAllData').then(function(data){
     STATE.data = data;
-    STATE.currentTab = null;
     render();
   }).catch(showErr);
 }
@@ -528,17 +544,20 @@ function setRole(r){
   STATE.currentTab = null;
   STATE.showCatalog = false;
   render();
+  syncUrl();
 }
 function goHome(){
   if(STATE.locked) return;
   STATE.currentProjectId = null;
   STATE.currentTab = null;
   render();
+  syncUrl();
 }
 function openProject(id){
   STATE.currentProjectId = id;
   STATE.currentTab = defaultTabForRole();
   render();
+  syncUrl();
 }
 function defaultTabForRole(){
   if(STATE.role==='engineer') return 'tracker';
@@ -565,7 +584,7 @@ function tabsForRole(){
   return [['review','Progress Review'],['planning','Planning'],['schedule','Schedule'],['cashflow','BOQ'],
     ['daily','Daily Tracking'],['report','Progress Report'],['manage','Manage']];
 }
-function setTab(t){ STATE.currentTab = t; render(); }
+function setTab(t){ STATE.currentTab = t; render(); syncUrl(); }
 
 // ============================= RENDER: PROJECT LIST =============================
 function renderProjectList(){
@@ -596,10 +615,12 @@ function renderProjectList(){
 function openCatalog(){
   STATE.showCatalog = true;
   render();
+  syncUrl();
 }
 function closeCatalog(){
   STATE.showCatalog = false;
   render();
+  syncUrl();
 }
 
 // ============================= RENDER: PROJECT CONTENT ROUTER =============================
@@ -1819,6 +1840,7 @@ function deleteProjectConfirm(projectId, projectName, btn){
       STATE.currentProjectId = (data.projects[0] && data.projects[0].ProjectID) || null;
       STATE.currentTab = defaultTabForRole();
       render();
+      syncUrl();
     });
   }).catch(function(err){ btnReset(btn); showErr(err); });
 }
@@ -2064,7 +2086,7 @@ function createProject(btn){
   apiPost('addProject', payload).then(function(res){
     closeModal(); toast('Project created');
     return apiGet('getAllData').then(function(data){
-      STATE.data = data; STATE.currentProjectId = res.projectId; STATE.currentTab = defaultTabForRole(); render();
+      STATE.data = data; STATE.currentProjectId = res.projectId; STATE.currentTab = defaultTabForRole(); render(); syncUrl();
     });
   }).catch(function(err){ btnReset(btn); showErr(err); });
 }
