@@ -10,12 +10,15 @@
     --line:#e4ddd0; --accent:#c1592b; --accent-dark:#a3461e;
     /* Derived visual-status palette: grey=not started/on-time,
        red=not started/delayed, blue=in progress/on-time,
-       yellow=in progress/delayed, green=done. */
+       yellow=in progress/delayed, green=done, purple=revisions required,
+       orange=selection pending. */
     --vs-green:#15803d; --vs-green-bg:#dcfce7;
     --vs-blue:#1d4ed8; --vs-blue-bg:#dbeafe;
     --vs-yellow:#b45309; --vs-yellow-bg:#fef3c7;
     --vs-red:#dc2626; --vs-red-bg:#fee2e2;
     --vs-grey:#57606f; --vs-grey-bg:#e2e5ea;
+    --vs-purple:#7e22ce; --vs-purple-bg:#f3e8ff;
+    --vs-orange:#c2410c; --vs-orange-bg:#ffedd5;
     --na:#7d8794; --na-bg:#eceef1;
     /* legacy aliases still used by payment-status chips (Pending/Partial/Paid,
        an unrelated vocabulary — not part of the derived scheme above) */
@@ -92,6 +95,8 @@
   .status-chip.vs-yellow{background:var(--vs-yellow-bg);color:var(--vs-yellow);}
   .status-chip.vs-red{background:var(--vs-red-bg);color:var(--vs-red);}
   .status-chip.vs-grey{background:var(--vs-grey-bg);color:var(--vs-grey);}
+  .status-chip.vs-purple{background:var(--vs-purple-bg);color:var(--vs-purple);}
+  .status-chip.vs-orange{background:var(--vs-orange-bg);color:var(--vs-orange);}
   .status-chip.N-A{background:var(--na-bg);color:var(--na);}
   .status-chip.Partial{background:var(--progress-bg);color:var(--progress);}
   .status-chip.Pending{background:var(--notstarted-bg);color:var(--notstarted);}
@@ -141,6 +146,8 @@
   .stage-cell.vs-yellow{background:var(--vs-yellow);}
   .stage-cell.vs-red{background:var(--vs-red);}
   .stage-cell.vs-grey{background:var(--vs-grey-bg);border-color:var(--line);}
+  .stage-cell.vs-purple{background:var(--vs-purple);}
+  .stage-cell.vs-orange{background:var(--vs-orange);}
   .stage-cell.N-A{background:var(--na-bg);border:1px dashed var(--na);}
   .stage-cell:hover{outline:2px solid var(--ink);outline-offset:1px;}
   .add-material-row{padding:10px;border-top:1px dashed var(--line);}
@@ -169,6 +176,8 @@
   .sched-bar.vs-yellow{background:var(--vs-yellow);}
   .sched-bar.vs-red{background:var(--vs-red);}
   .sched-bar.vs-grey{background:var(--vs-grey);}
+  .sched-bar.vs-purple{background:var(--vs-purple);}
+  .sched-bar.vs-orange{background:var(--vs-orange);}
   .sched-bar.critical{outline:3px solid var(--accent);outline-offset:1px;}
   .sched-bar:active{cursor:grabbing;}
   .sched-bar-fill{position:absolute;left:0;top:0;bottom:0;background:rgba(255,255,255,.35);pointer-events:none;}
@@ -293,14 +302,22 @@ var STATE = {
 })();
 
 var STATUS_LIST = ['Not Started','In Progress','Done','N/A'];
-var ACTIVITY_STATUS_LIST = ['Not Started','In Progress','Done'];
+// Execution-stage status vocabulary (Phase 8) — matches Code.js's
+// ACTIVITY_STATUSES exactly (from the real IDS_DEEPAK_280426 site-tracking
+// sheet).
+var ACTIVITY_STATUS_LIST = ['Not Started','In Progress','Done','Not Required','Revisions Required','Selection Pending'];
 var DELAY_REASONS = ['Design Finalization Delay','Material Selection Delay','Order Placement Delay','Material Delivery Delay (Vendor)','Execution Agency Delay','Other'];
 // Delay is derived, not stored: compares the current date against the
 // original plan (and, failing that, against today) rather than relying on a
 // manually-set "Delayed" status. Done is always green regardless of timing.
+// 'Not Required' behaves like N/A (excluded, neutral). 'Revisions Required'/
+// 'Selection Pending' are blocked states shown in their own colors
+// regardless of date — not date-delay-derived like Not Started/In Progress.
 function deriveVisual(status, originalDate, currentDate){
   if(status==='Done') return {cls:'vs-green', delayed:false};
-  if(status==='N/A') return {cls:'N-A', delayed:false};
+  if(status==='N/A' || status==='Not Required') return {cls:'N-A', delayed:false};
+  if(status==='Revisions Required') return {cls:'vs-purple', delayed:true};
+  if(status==='Selection Pending') return {cls:'vs-orange', delayed:true};
   var delayed = false;
   if(currentDate && originalDate && currentDate > originalDate) delayed = true;
   if(currentDate && todayISO() > currentDate) delayed = true;
@@ -397,9 +414,12 @@ function stagePct_(rows, stagesKey){
 function blendPct_(spaces, boqRows, actRows){
   var designPct = stagePct_(spaces, 'Design');
   var materialPct = stagePct_(boqRows, 'Stages');
+  // 'Not Required' stages are excluded, same as N/A elsewhere — they don't
+  // apply to this space, so they shouldn't drag the average down.
+  var relevantActs = actRows.filter(function(r){ return r.Status!=='Not Required'; });
   var execPct = null;
-  if(actRows.length){
-    execPct = actRows.reduce(function(a,r){return a+(Number(r.PercentComplete)||0);},0) / actRows.length;
+  if(relevantActs.length){
+    execPct = relevantActs.reduce(function(a,r){return a+(Number(r.PercentComplete)||0);},0) / relevantActs.length;
   }
   var parts = [designPct, materialPct, execPct].filter(function(p){return p!==null;});
   return parts.length ? Math.round(parts.reduce(function(a,b){return a+b;},0)/parts.length) : 0;
@@ -742,13 +762,29 @@ function renderTrackerView(editable){
   if(!spaces.length) html += '<div class="empty-state">No spaces yet.</div>';
   return html;
 }
+function spaceOptionsHtml_(spaces){
+  var floors = [];
+  spaces.forEach(function(s){ if(s.Floor && floors.indexOf(s.Floor)===-1) floors.push(s.Floor); });
+  if(floors.length < 2){
+    return spaces.map(function(s){return '<option value="'+s.SpaceID+'" '+(STATE.filters.space===s.SpaceID?'selected':'')+'>'+escapeHtml(s.Name)+'</option>';}).join('');
+  }
+  var noFloor = spaces.filter(function(s){ return !s.Floor; });
+  var html = floors.map(function(floor){
+    var group = spaces.filter(function(s){ return s.Floor===floor; });
+    return '<optgroup label="'+escapeHtml(floor)+'">'+group.map(function(s){
+      return '<option value="'+s.SpaceID+'" '+(STATE.filters.space===s.SpaceID?'selected':'')+'>'+escapeHtml(s.Name)+'</option>';
+    }).join('')+'</optgroup>';
+  }).join('');
+  if(noFloor.length) html += noFloor.map(function(s){return '<option value="'+s.SpaceID+'" '+(STATE.filters.space===s.SpaceID?'selected':'')+'>'+escapeHtml(s.Name)+'</option>';}).join('');
+  return html;
+}
 function filterBar(){
   var pid = STATE.currentProjectId;
   var spaces = spacesOf(pid);
   var cats = STATE.data.schema.categories;
   var html = '<div class="filters">'+
     '<select onchange="STATE.filters.space=this.value;render()"><option value="">All spaces</option>'+
-    spaces.map(function(s){return '<option value="'+s.SpaceID+'" '+(STATE.filters.space===s.SpaceID?'selected':'')+'>'+escapeHtml(s.Name)+'</option>';}).join('')+
+    spaceOptionsHtml_(spaces)+
     '</select>'+
     '<select onchange="STATE.filters.category=this.value;render()"><option value="">All categories</option>'+
     cats.map(function(c){return '<option value="'+c+'" '+(STATE.filters.category===c?'selected':'')+'>'+c+'</option>';}).join('')+
@@ -944,7 +980,6 @@ function openActivityDetailModal(activityId){
   var sp = STATE.data.spaces.filter(function(s){return s.SpaceID===act.SpaceID;})[0];
   var vis = deriveVisual(act.Status, act.OriginalEndDate, act.EndDate);
   var isCritical = computeCriticalPath(STATE.currentProjectId).some(function(a){return a.ActivityID===activityId;});
-  var lines = boqItemsOf(STATE.currentProjectId, act.SpaceID).filter(function(r){return r.Agency===act.Agency;});
 
   var body = '<h3>'+escapeHtml(act.Agency)+' &mdash; '+escapeHtml(sp?sp.Name:'')+'</h3>'+
     '<span class="status-chip '+vis.cls+'" style="margin-bottom:12px;">'+act.Status+(vis.delayed?' · Delayed':'')+'</span>'+
@@ -955,12 +990,6 @@ function openActivityDetailModal(activityId){
     '</div>'+
     (act.DelayReason ? '<div class="field"><label>Delay Reason</label><div style="font-size:13.5px;">'+escapeHtml(act.DelayReason)+'</div></div>' : '')+
     (act.Notes ? '<div class="field"><label>Notes</label><div style="font-size:13.5px;">'+escapeHtml(act.Notes)+'</div></div>' : '')+
-    '<div class="section-title" style="margin-top:16px;">Materials under '+escapeHtml(act.Agency)+'</div>'+
-    (lines.length ? '<ul class="plain">'+lines.map(function(r){
-        var stageVis = r.Stages.map(function(s){return deriveVisual(s.status,s.originalTarget,s.target);});
-        var anyDelayed = stageVis.some(function(v){return v.delayed;});
-        return '<li>'+escapeHtml(r.MaterialName)+' &mdash; '+escapeHtml(r.RollupStatus)+(anyDelayed?' <span style="color:var(--vs-red);font-weight:700;">(delayed)</span>':'')+'</li>';
-      }).join('')+'</ul>' : '<p style="color:var(--ink-soft);font-size:13px;">No BOQ lines under this trade yet.</p>')+
     '<div class="modal-actions"><button class="btn" onclick="closeModal()">Close</button>'+
     (STATE.role==='admin' ? '<button class="btn primary" onclick="closeModal();openActivityModal(\''+activityId+'\')">Edit Activity</button>' : '')+
     '</div>';
@@ -1129,7 +1158,10 @@ function startBarDrag(e, barEl, mode){
 function openActivityModal(activityId){
   var act = STATE.data.activities.filter(function(a){return a.ActivityID===activityId;})[0];
   var sp = STATE.data.spaces.filter(function(s){return s.SpaceID===act.SpaceID;})[0];
-  var others = activitiesOf(STATE.currentProjectId).filter(function(a){return a.ActivityID!==activityId;});
+  // Same-space only — stages already chain implicitly in their fixed order,
+  // so this picker is just for the rare manual override, not a default
+  // project-wide list (would be 50+ checkboxes across all 27-stage spaces).
+  var others = activitiesOf(STATE.currentProjectId).filter(function(a){return a.ActivityID!==activityId && a.SpaceID===act.SpaceID;});
   var preds = act.Predecessors||[];
   var wd = (sp&&sp.Design||[]).filter(function(d){return d.stage==='WD';})[0];
   var wdBlocked = !wd || wd.status!=='Done';
@@ -1450,8 +1482,20 @@ function renderDailyView(){
 function attachDailyHandlers(){ renderDailyActivityRows(); }
 function activitiesActiveOn(spaceId, date){
   return activitiesOf(STATE.currentProjectId).filter(function(a){
-    return a.SpaceID===spaceId && a.Status!=='Done' && a.StartDate<=date;
+    return a.SpaceID===spaceId && a.Status!=='Done' && a.Status!=='Not Required' && a.StartDate<=date;
   });
+}
+// Agencies among this space's BOQ lines that still have a pending Order
+// Placement stage — independent of Schedule (Phase 8 decoupled the two),
+// computed directly from BOQ_ITEMS so the checkbox always has something
+// real to bulk-mark, regardless of which execution Stage is active.
+function agenciesWithPendingOrderPlacement(projectId, spaceId){
+  var seen = {}, out = [];
+  boqItemsOf(projectId, spaceId).forEach(function(r){
+    var pending = r.Stages.some(function(s){ return s.stage==='Order Placement' && s.status!=='Done'; });
+    if(pending && !seen[r.Agency]){ seen[r.Agency]=true; out.push(r.Agency); }
+  });
+  return out;
 }
 // Design stages progress 2D -> 3D -> WD in order; the daily log only ever
 // offers to finalize the single next one, matching how design actually
@@ -1474,6 +1518,17 @@ function renderDailyDesignSection(sp){
       '<input type="checkbox" id="dl-design-done" style="width:auto;" data-stage="'+escapeHtml(pending.stage)+'"> Mark \''+escapeHtml(pending.stage)+'\' finalized today</label>' : '')+
     '</div>';
 }
+function renderDailyOrderPlacementSection(projectId, spaceId){
+  var agencies = agenciesWithPendingOrderPlacement(projectId, spaceId);
+  if(!agencies.length) return '';
+  return '<div class="card" style="padding:10px 12px;margin-bottom:8px;">'+
+    '<div style="font-weight:700;font-size:13px;margin-bottom:6px;">Materials &mdash; Order Placement</div>'+
+    agencies.map(function(agency){
+      return '<label style="display:flex;align-items:center;gap:7px;font-weight:400;font-size:13px;margin:4px 0;">'+
+        '<input type="checkbox" class="dl-order-agency" value="'+escapeHtml(agency)+'" style="width:auto;"> Order Placement done for '+escapeHtml(agency)+' materials today</label>';
+    }).join('')+
+    '</div>';
+}
 function renderDailyActivityRows(){
   var container = document.getElementById('dl-activity-rows');
   if(!container) return;
@@ -1482,18 +1537,16 @@ function renderDailyActivityRows(){
   var acts = spaceId ? activitiesActiveOn(spaceId, date) : [];
   var sp = spaceId ? STATE.data.spaces.filter(function(s){return s.SpaceID===spaceId;})[0] : null;
   var designHtml = renderDailyDesignSection(sp);
+  var orderHtml = spaceId ? renderDailyOrderPlacementSection(STATE.currentProjectId, spaceId) : '';
 
   if(!acts.length){
-    container.innerHTML = designHtml + '<div class="field"><label>What got done today / blockers</label>'+
-      '<textarea id="dl-entry" placeholder="'+(spaceId ? 'No scheduled activities for this date — describe what happened...' : 'e.g. Flooring grouting completed in living area, kitchen tile delivery delayed...')+'"></textarea></div>';
+    container.innerHTML = designHtml + orderHtml + '<div class="field"><label>What got done today / blockers</label>'+
+      '<textarea id="dl-entry" placeholder="'+(spaceId ? 'No scheduled stages for this date — describe what happened...' : 'e.g. Flooring grouting completed in living area, kitchen tile delivery delayed...')+'"></textarea></div>';
     return;
   }
 
-  var html = designHtml + '<div class="field-hint" style="margin-bottom:8px;">Activities scheduled for this space as of '+fmtDate(date)+' &mdash; update each:</div>';
+  var html = designHtml + orderHtml + '<div class="field-hint" style="margin-bottom:8px;">Stages scheduled for this space as of '+fmtDate(date)+' &mdash; update each:</div>';
   acts.forEach(function(a){
-    var hasPendingOrder = boqItemsOf(STATE.currentProjectId, spaceId).some(function(r){
-      return r.Agency===a.Agency && r.Stages.some(function(s){ return s.stage==='Order Placement' && s.status!=='Done'; });
-    });
     html += '<div class="card" style="padding:10px 12px;margin-bottom:8px;">'+
       '<div style="font-weight:700;font-size:13px;margin-bottom:6px;">'+escapeHtml(a.Agency)+'</div>'+
       '<div class="field-row">'+
@@ -1505,9 +1558,7 @@ function renderDailyActivityRows(){
         '</select></div>'+
         '<div class="field" style="margin-bottom:6px;"><label>% Complete</label><input type="number" class="dl-act-percent" data-activity-id="'+a.ActivityID+'" min="0" max="100" value="'+(a.PercentComplete||0)+'"></div>'+
       '</div>'+
-      '<div class="field" style="margin-bottom:'+(hasPendingOrder?'6px':'0')+';"><label>Expected End Date</label><input type="date" class="dl-act-end" data-activity-id="'+a.ActivityID+'" value="'+a.EndDate+'"></div>'+
-      (hasPendingOrder ? '<label style="display:flex;align-items:center;gap:7px;font-weight:400;font-size:13px;margin:0;">'+
-        '<input type="checkbox" class="dl-act-orderplaced" data-activity-id="'+a.ActivityID+'" style="width:auto;"> Order Placement done for '+escapeHtml(a.Agency)+' materials today</label>' : '')+
+      '<div class="field" style="margin-bottom:0;"><label>Expected End Date</label><input type="date" class="dl-act-end" data-activity-id="'+a.ActivityID+'" value="'+a.EndDate+'"></div>'+
       '</div>';
   });
   html += '<div class="field"><label>Additional notes (optional)</label><textarea id="dl-notes" placeholder="Anything else worth flagging..."></textarea></div>';
@@ -1524,19 +1575,21 @@ function submitDailyLog(){
   var statusEls = document.querySelectorAll('.dl-act-status');
   var designEl = document.getElementById('dl-design-done');
   var designStageDone = (designEl && designEl.checked) ? designEl.dataset.stage : '';
+  var orderEls = document.querySelectorAll('.dl-order-agency:checked');
 
-  if(statusEls.length || designStageDone){
+  if(statusEls.length || designStageDone || orderEls.length){
     var updates = Array.from(statusEls).map(function(sel){
       var id = sel.dataset.activityId;
       var percentEl = document.querySelector('.dl-act-percent[data-activity-id="'+id+'"]');
       var endEl = document.querySelector('.dl-act-end[data-activity-id="'+id+'"]');
-      var orderEl = document.querySelector('.dl-act-orderplaced[data-activity-id="'+id+'"]');
-      return { activityId: id, status: sel.value, endDate: endEl.value, percentComplete: Number(percentEl.value)||0, orderPlacementDone: !!(orderEl&&orderEl.checked) };
+      return { activityId: id, status: sel.value, endDate: endEl.value, percentComplete: Number(percentEl.value)||0 };
     });
+    var orderPlacements = Array.from(orderEls).map(function(cb){ return { agency: cb.value, done: true }; });
     var notesEl = document.getElementById('dl-notes');
     apiPost('submitActivityUpdates', {
       date: date, projectId: STATE.currentProjectId, spaceId: spaceId, loggedBy: by,
-      hasBlocker: hasBlocker, notes: notesEl?notesEl.value.trim():'', designStageDone: designStageDone, updates: updates
+      hasBlocker: hasBlocker, notes: notesEl?notesEl.value.trim():'', designStageDone: designStageDone,
+      updates: updates, orderPlacements: orderPlacements
     }).then(function(){
       toast('Logged'); refresh();
     }).catch(showErr);
@@ -1674,13 +1727,24 @@ function renderManageView(){
     '</div>';
 
   html += '<div class="card" style="max-width:560px;"><h3>Spaces</h3>';
-  spaces.forEach(function(s){
-    html += '<div class="chip-remove">'+escapeHtml(s.Name)+'</div>';
-  });
-  html += '<div class="space-adder" style="margin-top:10px;">'+
+  var hasFloors = spaces.some(function(s){ return s.Floor; });
+  if(hasFloors){
+    var byFloor = {};
+    spaces.forEach(function(s){ var f = s.Floor||'(No Floor)'; (byFloor[f]=byFloor[f]||[]).push(s); });
+    Object.keys(byFloor).forEach(function(floor){
+      html += '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:var(--ink-soft);margin:8px 0 4px;">'+escapeHtml(floor)+'</div>';
+      byFloor[floor].forEach(function(s){ html += '<div class="chip-remove">'+escapeHtml(s.Name)+'</div>'; });
+    });
+  } else {
+    spaces.forEach(function(s){
+      html += '<div class="chip-remove">'+escapeHtml(s.Name)+'</div>';
+    });
+  }
+  html += '<div class="space-adder" style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap;">'+
     '<input type="text" id="mg-newspace" placeholder="New space name (e.g. Kitchen)">'+
+    '<input type="text" id="mg-newspace-floor" placeholder="Floor (optional, e.g. First)" style="max-width:170px;">'+
     '<button class="btn" onclick="addSpaceToProject()">Add Space</button></div>'+
-    '<div style="font-size:11.5px;color:var(--ink-soft);">A new space starts empty &mdash; add materials to it from the Planning tab (pick from the Materials Catalog, enter quantity).</div>'+
+    '<div style="font-size:11.5px;color:var(--ink-soft);margin-top:6px;">A new space starts empty &mdash; add materials to it from the Planning tab (pick from the Materials Catalog, enter quantity).</div>'+
     '</div>';
 
   var clientLink = window.location.origin + window.location.pathname + '?project=' + pid + '&role=client';
@@ -1716,8 +1780,9 @@ function saveProjectMeta(){
 }
 function addSpaceToProject(){
   var name = document.getElementById('mg-newspace').value.trim();
+  var floor = document.getElementById('mg-newspace-floor').value.trim();
   if(!name){ toast('Enter a space name'); return; }
-  apiPost('addSpace', { projectId: STATE.currentProjectId, name: name }).then(function(){
+  apiPost('addSpace', { projectId: STATE.currentProjectId, name: name, floor: floor }).then(function(){
     toast('Space added'); refresh();
   }).catch(showErr);
 }
@@ -1726,17 +1791,24 @@ function addSpaceToProject(){
 function renderMaterialsCatalogView(){
   var mats = STATE.data.materialsConfig;
   var agencies = STATE.data.schema.agencies;
+  var taxonomy = STATE.data.schema.taxonomy;
+  var catKeys = Object.keys(taxonomy);
   var byCat = {};
   mats.forEach(function(m){ (byCat[m.Category]=byCat[m.Category]||[]).push(m); });
   var html = '<div class="toolbar-row"><button class="btn" onclick="closeCatalog()">&larr; Back to Projects</button>'+
     '<button class="btn primary" onclick="openAddMaterialToCatalogModal()">+ Add Material</button></div>';
   html += '<div class="section-title">Materials Catalog<span style="font-weight:400;text-transform:none;letter-spacing:0;">'+mats.length+' materials, shared across all projects &mdash; click any field to edit</span></div>';
-  Object.keys(byCat).sort().forEach(function(cat){
+  catKeys.forEach(function(cat){
+    var rows = byCat[cat];
+    if(!rows || !rows.length) return;
     html += '<div class="table-wrap" style="margin-bottom:14px;"><table class="tracker"><thead><tr>'+
-      '<th>'+escapeHtml(cat)+'</th><th>Unit</th><th>Rate</th><th>Agency</th></tr></thead><tbody>';
-    byCat[cat].forEach(function(m){
+      '<th>'+escapeHtml(cat)+'</th><th>Subcategory</th><th>Unit</th><th>Rate</th><th>Agency</th></tr></thead><tbody>';
+    rows.forEach(function(m){
       html += '<tr>'+
         '<td><input class="inline-edit" value="'+escapeHtml(m.Name)+'" onchange="saveMaterialField(\''+m.MaterialID+'\',\'name\',this.value)"></td>'+
+        '<td><select class="inline-edit" onchange="saveMaterialField(\''+m.MaterialID+'\',\'subcategory\',this.value)">'+
+          (taxonomy[cat]||[]).map(function(sc){return '<option '+(m.Subcategory===sc?'selected':'')+'>'+escapeHtml(sc)+'</option>';}).join('')+
+        '</select></td>'+
         '<td><input class="inline-edit" style="width:70px;" value="'+escapeHtml(m.Unit)+'" onchange="saveMaterialField(\''+m.MaterialID+'\',\'unit\',this.value)"></td>'+
         '<td><input class="inline-edit" type="number" style="width:80px;" value="'+(m.Rate||0)+'" onchange="saveMaterialField(\''+m.MaterialID+'\',\'rate\',this.value)"></td>'+
         '<td><select class="inline-edit" onchange="saveMaterialField(\''+m.MaterialID+'\',\'agency\',this.value)">'+
@@ -1746,6 +1818,13 @@ function renderMaterialsCatalogView(){
     });
     html += '</tbody></table></div>';
   });
+  html += '<div class="section-title">Move to a different Category</div><div class="table-wrap"><table class="tracker"><tbody>'+
+    mats.map(function(m){
+      return '<tr><td>'+escapeHtml(m.Name)+'</td><td><select class="inline-edit" onchange="saveMaterialCategory(\''+m.MaterialID+'\',this.value)">'+
+        catKeys.map(function(c){return '<option '+(m.Category===c?'selected':'')+'>'+escapeHtml(c)+'</option>';}).join('')+
+        '</select></td></tr>';
+    }).join('')+
+    '</tbody></table></div>';
   return html;
 }
 function saveMaterialField(materialId, field, value){
@@ -1756,10 +1835,28 @@ function saveMaterialField(materialId, field, value){
   payload[field] = value;
   apiPost('updateMaterial', payload).catch(function(err){ showErr(err); refresh(); });
 }
+// Changing Category moves the row into a different grouped table, so (unlike
+// other inline edits) this refreshes the whole view; Subcategory resets to
+// the new Category's first option since the old one likely no longer applies.
+function saveMaterialCategory(materialId, newCategory){
+  var taxonomy = STATE.data.schema.taxonomy;
+  var newSub = (taxonomy[newCategory]||[])[0] || '';
+  apiPost('updateMaterial', { materialId: materialId, category: newCategory, subcategory: newSub }).then(function(){
+    toast('Category updated'); refresh();
+  }).catch(showErr);
+}
 function materialFormBody(title, m){
   var agencies = STATE.data.schema.agencies;
+  var taxonomy = STATE.data.schema.taxonomy;
+  var catKeys = Object.keys(taxonomy);
+  var cat = m ? m.Category : catKeys[0];
   return '<h3>'+title+'</h3>'+
-    '<div class="field"><label>Category</label><input id="mt-cat" value="'+escapeHtml(m?m.Category:'')+'" placeholder="e.g. CARPENTRY"></div>'+
+    '<div class="field-row">'+
+      '<div class="field"><label>Category</label><select id="mt-cat" onchange="renderMtSubcategoryOptions()">'+
+        catKeys.map(function(c){return '<option '+(cat===c?'selected':'')+'>'+escapeHtml(c)+'</option>';}).join('')+
+      '</select></div>'+
+      '<div class="field"><label>Subcategory</label><select id="mt-subcat"></select></div>'+
+    '</div>'+
     '<div class="field"><label>Material Name</label><input id="mt-name" value="'+escapeHtml(m?m.Name:'')+'" placeholder="e.g. 19mm Ply"></div>'+
     '<div class="field-row">'+
       '<div class="field"><label>Unit</label><input id="mt-unit" value="'+escapeHtml(m?m.Unit:'')+'" placeholder="e.g. Sq. Ft"></div>'+
@@ -1769,15 +1866,24 @@ function materialFormBody(title, m){
       agencies.map(function(a){return '<option '+(m&&m.Agency===a?'selected':'')+'>'+a+'</option>';}).join('')+
     '</select></div>';
 }
+function renderMtSubcategoryOptions(){
+  var taxonomy = STATE.data.schema.taxonomy;
+  var cat = document.getElementById('mt-cat').value;
+  document.getElementById('mt-subcat').innerHTML = (taxonomy[cat]||[]).map(function(sc){
+    return '<option>'+escapeHtml(sc)+'</option>';
+  }).join('');
+}
 function openAddMaterialToCatalogModal(){
   var body = materialFormBody('Add Material', null)+
     '<div class="modal-actions"><button class="btn" onclick="closeModal()">Cancel</button>'+
     '<button class="btn primary" onclick="saveNewMaterial()">Add</button></div>';
   showModal(body);
+  renderMtSubcategoryOptions();
 }
 function saveNewMaterial(){
   var payload = {
-    category: document.getElementById('mt-cat').value.trim(),
+    category: document.getElementById('mt-cat').value,
+    subcategory: document.getElementById('mt-subcat').value,
     name: document.getElementById('mt-name').value.trim(),
     unit: document.getElementById('mt-unit').value.trim(),
     rate: document.getElementById('mt-rate').value,
