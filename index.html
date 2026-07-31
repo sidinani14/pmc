@@ -172,6 +172,11 @@
   .sched-space-group{border-bottom:1px solid var(--line);}
   .sched-space-title{padding:6px 10px;font-size:11.5px;font-weight:700;color:var(--accent-dark);background:#fbf9f5;
     position:sticky;left:0;width:220px;}
+  .sched-cat-title{padding:4px 10px 4px 18px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;
+    color:var(--ink-soft);position:sticky;left:0;width:220px;background:#fff;}
+  .cat-remove-btn{border:none;background:none;color:var(--ink-soft);cursor:pointer;font-size:12px;font-weight:700;
+    padding:0 2px;margin-left:4px;}
+  .cat-remove-btn:hover{color:#c0392b;}
   .sched-row{display:flex;align-items:center;min-height:38px;border-top:1px solid #f0ede6;}
   .sched-row-label{width:220px;min-width:220px;flex-shrink:0;padding:6px 10px;font-size:12.5px;position:sticky;left:0;
     background:#fff;border-right:1px solid var(--line);z-index:4;}
@@ -695,16 +700,26 @@ function statBox(label, value, tone){
 // current dates, delay reason, and critical-path status.
 function spaceActivityChips(pid, spaceId){
   var acts = activitiesOf(pid).filter(function(a){ return a.SpaceID===spaceId; });
+  if(!acts.length) return '<div class="space-chip-row"><span style="font-size:12px;color:var(--ink-soft);">No categories added to this space yet</span></div>';
   var critical = computeCriticalPath(pid).map(function(a){return a.ActivityID;});
-  var html = '<div class="space-chip-row">';
+  var byCat = {}, catOrder = [];
   acts.forEach(function(a){
-    var vis = deriveVisual(a.Status, a.OriginalEndDate, a.EndDate);
-    var isCritical = critical.indexOf(a.ActivityID)>-1;
-    html += '<span class="status-chip '+vis.cls+'" style="cursor:pointer;'+(isCritical?'box-shadow:0 0 0 2px var(--accent) inset;':'')+'" onclick="openActivityDetailModal(\''+a.ActivityID+'\')" title="Click for details">'+
-      '<span class="dot"></span>'+escapeHtml(a.Agency)+(isCritical?' &#9888;':'')+'</span>';
+    var c = a.Category || '(Uncategorized)';
+    if(!byCat[c]){ byCat[c]=[]; catOrder.push(c); }
+    byCat[c].push(a);
   });
-  if(!acts.length) html += '<span style="font-size:12px;color:var(--ink-soft);">No trades started in this space yet</span>';
-  return html + '</div>';
+  var html = '';
+  catOrder.forEach(function(cat){
+    html += '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:var(--ink-soft);margin:6px 0 3px;">'+escapeHtml(cat)+'</div><div class="space-chip-row">';
+    byCat[cat].forEach(function(a){
+      var vis = deriveVisual(a.Status, a.OriginalEndDate, a.EndDate);
+      var isCritical = critical.indexOf(a.ActivityID)>-1;
+      html += '<span class="status-chip '+vis.cls+'" style="cursor:pointer;'+(isCritical?'box-shadow:0 0 0 2px var(--accent) inset;':'')+'" onclick="openActivityDetailModal(\''+a.ActivityID+'\')" title="Click for details">'+
+        '<span class="dot"></span>'+escapeHtml(a.Agency)+(isCritical?' &#9888;':'')+'</span>';
+    });
+    html += '</div>';
+  });
+  return html;
 }
 
 // ============================= DESIGN (per space) =============================
@@ -881,12 +896,14 @@ function saveStage(boqItemId, stageName){
 // user can always flip it via the link in amMeasurementHtml().
 var amDirectMode = true;
 function openAddMaterialModal(spaceId){
-  var cats = STATE.data.schema.categories;
+  var taxonomy = STATE.data.schema.taxonomy;
+  var catKeys = Object.keys(taxonomy);
   amDirectMode = true;
   var body = '<h3>Add Material</h3>'+
-    '<div class="field"><label>Category</label><select id="am-cat" onchange="renderAmMaterialOptions()">'+
-      cats.map(function(c){return '<option value="'+escapeHtml(c)+'">'+escapeHtml(c)+'</option>';}).join('')+
+    '<div class="field"><label>Category</label><select id="am-cat" onchange="renderAmSubcatOptions()">'+
+      catKeys.map(function(c){return '<option value="'+escapeHtml(c)+'">'+escapeHtml(c)+'</option>';}).join('')+
     '</select></div>'+
+    '<div class="field"><label>Subcategory</label><select id="am-subcat" onchange="renderAmMaterialOptions()"></select></div>'+
     '<div class="field"><label>Material</label><select id="am-material" onchange="renderAmDetails()"></select></div>'+
     '<div class="field-row">'+
       '<div class="field"><label>Unit</label><input id="am-unit" readonly></div>'+
@@ -901,6 +918,14 @@ function openAddMaterialModal(spaceId){
     '<div class="modal-actions"><button class="btn" onclick="closeModal()">Cancel</button>'+
     '<button class="btn primary" onclick="saveAddMaterial(\''+spaceId+'\',this)">Add to BOQ</button></div>';
   showModal(body);
+  renderAmSubcatOptions();
+}
+function renderAmSubcatOptions(){
+  var taxonomy = STATE.data.schema.taxonomy;
+  var cat = document.getElementById('am-cat').value;
+  document.getElementById('am-subcat').innerHTML = (taxonomy[cat]||[]).map(function(sc){
+    return '<option>'+escapeHtml(sc)+'</option>';
+  }).join('');
   renderAmMaterialOptions();
 }
 function amMeasurementHtml(){
@@ -938,10 +963,13 @@ function amToggleMode(){
 }
 function renderAmMaterialOptions(){
   var cat = document.getElementById('am-cat').value;
-  var mats = STATE.data.materialsConfig.filter(function(m){ return m.Category===cat; });
-  document.getElementById('am-material').innerHTML = mats.map(function(m){
-    return '<option value="'+m.MaterialID+'">'+escapeHtml(m.Name)+' ('+fmtMoney(m.Rate)+'/'+escapeHtml(m.Unit)+')</option>';
-  }).join('');
+  var subcat = document.getElementById('am-subcat').value;
+  var mats = STATE.data.materialsConfig.filter(function(m){ return m.Category===cat && m.Subcategory===subcat; });
+  document.getElementById('am-material').innerHTML = mats.length ?
+    mats.map(function(m){
+      return '<option value="'+m.MaterialID+'">'+escapeHtml(m.Name)+' ('+fmtMoney(m.Rate)+'/'+escapeHtml(m.Unit)+')</option>';
+    }).join('') :
+    '<option value="">No catalog material for this subcategory yet</option>';
   renderAmDetails();
 }
 function renderAmDetails(){
@@ -1061,48 +1089,75 @@ function renderScheduleChart(pid, opts){
   var svgId = opts.svgId || 'schedSvgRO';
   var acts = activitiesOf(pid);
   var spaces = spacesOf(pid);
-  if(!acts.length){
-    return '<div class="empty-state">No schedule activities yet.</div>';
+  if(!spaces.length){
+    return '<div class="empty-state">No spaces yet.</div>';
   }
-  var starts = acts.map(function(a){return a.StartDate;}).sort();
-  var ends = acts.map(function(a){return a.EndDate;}).sort();
-  var rangeStart = addDaysISO(starts[0], -3);
-  var rangeEnd = addDaysISO(ends[ends.length-1], 3);
-  var totalDays = dayDiff(rangeStart, rangeEnd);
-  var timelineWidth = totalDays*SCHED_PX_PER_DAY;
 
-  var header = '<div class="sched-header"><div class="sched-label-col">Space / Agency</div>'+
-    '<div class="sched-timeline-head" style="width:'+timelineWidth+'px;">';
-  for(var d=0; d<totalDays; d+=7){
-    header += '<div class="sched-tick" style="left:'+(d*SCHED_PX_PER_DAY)+'px;">'+fmtDate(addDaysISO(rangeStart,d))+'</div>';
+  var hasTimeline = acts.length > 0;
+  var timelineWidth = 0, rangeStart = todayISO(), totalDays = 0, todayOffset = 0, header = '';
+  if(hasTimeline){
+    var starts = acts.map(function(a){return a.StartDate;}).sort();
+    var ends = acts.map(function(a){return a.EndDate;}).sort();
+    rangeStart = addDaysISO(starts[0], -3);
+    var rangeEnd = addDaysISO(ends[ends.length-1], 3);
+    totalDays = dayDiff(rangeStart, rangeEnd);
+    timelineWidth = totalDays*SCHED_PX_PER_DAY;
+    header = '<div class="sched-header"><div class="sched-label-col">Space / Task</div>'+
+      '<div class="sched-timeline-head" style="width:'+timelineWidth+'px;">';
+    for(var d=0; d<totalDays; d+=7){
+      header += '<div class="sched-tick" style="left:'+(d*SCHED_PX_PER_DAY)+'px;">'+fmtDate(addDaysISO(rangeStart,d))+'</div>';
+    }
+    todayOffset = dayDiff(rangeStart, todayISO());
+    header += '</div></div>';
   }
-  var todayOffset = dayDiff(rangeStart, todayISO());
-  header += '</div></div>';
 
   var critical = computeCriticalPath(pid).map(function(a){return a.ActivityID;});
   var body = '';
   spaces.forEach(function(sp){
     var rows = acts.filter(function(a){ return a.SpaceID===sp.SpaceID; });
-    if(!rows.length) return;
-    body += '<div class="sched-space-group"><div class="sched-space-title">'+escapeHtml(sp.Name)+'</div>';
+    if(!rows.length && opts.readOnly) return;
+    body += '<div class="sched-space-group"><div class="sched-space-title">'+escapeHtml(sp.Name)+
+      (opts.readOnly ? '' : ' <button class="btn small" style="font-weight:400;text-transform:none;letter-spacing:0;margin-left:4px;" onclick="openAddCategoriesModal(\''+sp.SpaceID+'\')">+ Categories</button>')+
+      '</div>';
+    if(!rows.length){
+      body += '<div class="field-hint" style="margin:2px 0 10px 18px;">No categories added yet for this space.</div></div>';
+      return;
+    }
+    var byCat = {}, catOrder = [];
     rows.forEach(function(a){
-      var left = dayDiff(rangeStart, a.StartDate)*SCHED_PX_PER_DAY;
-      var width = Math.max(dayDiff(a.StartDate, a.EndDate)*SCHED_PX_PER_DAY, 20);
-      var pct = Math.max(0, Math.min(100, Number(a.PercentComplete)||0));
-      var vis = deriveVisual(a.Status, a.OriginalEndDate, a.EndDate);
-      var isCritical = critical.indexOf(a.ActivityID)>-1;
-      body += '<div class="sched-row">'+
-        '<div class="sched-row-label">'+escapeHtml(a.Agency)+(isCritical?' <span style="color:var(--accent-dark);font-weight:800;" title="On the critical path">&#9888;</span>':'')+'<div style="font-size:10.5px;color:var(--ink-soft);">'+fmtDate(a.StartDate)+' &rarr; '+fmtDate(a.EndDate)+'</div></div>'+
-        '<div class="sched-row-timeline" style="width:'+timelineWidth+'px;">'+
-          '<div class="sched-bar '+vis.cls+(isCritical?' critical':'')+'" data-activity-id="'+a.ActivityID+'" style="left:'+left+'px;width:'+width+'px;'+(opts.readOnly?'cursor:default;':'')+'" title="'+escapeHtml(a.Agency+': '+a.Status+' ('+pct+'%)'+(isCritical?' · critical path':''))+'">'+
-            '<div class="sched-bar-fill" style="width:'+pct+'%;"></div>'+
-            '<span class="sched-bar-label">'+escapeHtml(a.Agency)+'</span>'+
-            (opts.readOnly? '' : '<div class="sched-resize" data-activity-id="'+a.ActivityID+'"></div>')+
-          '</div>'+
-        '</div></div>';
+      var c = a.Category || '(Uncategorized)';
+      if(!byCat[c]){ byCat[c]=[]; catOrder.push(c); }
+      byCat[c].push(a);
+    });
+    catOrder.forEach(function(cat){
+      body += '<div class="sched-cat-title">'+escapeHtml(cat)+
+        (opts.readOnly ? '' : '<button class="cat-remove-btn" title="Remove this category\'s tasks" onclick="deleteTaskCategoryPrompt(\''+sp.SpaceID+'\',\''+escapeHtml(cat).replace(/'/g,"\\'")+'\')">&times;</button>')+
+        '</div>';
+      byCat[cat].forEach(function(a){
+        var left = dayDiff(rangeStart, a.StartDate)*SCHED_PX_PER_DAY;
+        var width = Math.max(dayDiff(a.StartDate, a.EndDate)*SCHED_PX_PER_DAY, 20);
+        var pct = Math.max(0, Math.min(100, Number(a.PercentComplete)||0));
+        var vis = deriveVisual(a.Status, a.OriginalEndDate, a.EndDate);
+        var isCritical = critical.indexOf(a.ActivityID)>-1;
+        body += '<div class="sched-row">'+
+          '<div class="sched-row-label">'+escapeHtml(a.Agency)+(isCritical?' <span style="color:var(--accent-dark);font-weight:800;" title="On the critical path">&#9888;</span>':'')+'<div style="font-size:10.5px;color:var(--ink-soft);">'+fmtDate(a.StartDate)+' &rarr; '+fmtDate(a.EndDate)+'</div></div>'+
+          '<div class="sched-row-timeline" style="width:'+timelineWidth+'px;">'+
+            '<div class="sched-bar '+vis.cls+(isCritical?' critical':'')+'" data-activity-id="'+a.ActivityID+'" style="left:'+left+'px;width:'+width+'px;'+(opts.readOnly?'cursor:default;':'')+'" title="'+escapeHtml(a.Agency+': '+a.Status+' ('+pct+'%)'+(isCritical?' · critical path':''))+'">'+
+              '<div class="sched-bar-fill" style="width:'+pct+'%;"></div>'+
+              '<span class="sched-bar-label">'+escapeHtml(a.Agency)+'</span>'+
+              (opts.readOnly? '' : '<div class="sched-resize" data-activity-id="'+a.ActivityID+'"></div>')+
+            '</div>'+
+          '</div></div>';
+      });
     });
     body += '</div>';
   });
+
+  if(!hasTimeline){
+    return opts.readOnly ? '<div class="empty-state">No schedule activities yet.</div>' :
+      '<div class="field-hint" style="margin-bottom:10px;">No categories added to any space yet — use "+ Categories" below a space to build its checklist.</div>'+
+      '<div class="sched-wrap"><div class="sched-grid" id="'+gridId+'">'+body+'</div></div>';
+  }
 
   var hint = opts.readOnly ? '' :
     '<div class="field-hint" style="margin-bottom:10px;">Drag a bar to reschedule, drag its right edge to change duration, click it to edit status / dependencies. Dependent activities shift automatically.</div>';
@@ -1115,6 +1170,44 @@ function renderScheduleChart(pid, opts){
     '</div></div>';
 }
 
+function openAddCategoriesModal(spaceId){
+  var taxonomy = STATE.data.schema.taxonomy;
+  var existing = {};
+  activitiesOf(STATE.currentProjectId).filter(function(a){ return a.SpaceID===spaceId; }).forEach(function(a){ existing[a.Category]=true; });
+  var available = Object.keys(taxonomy).filter(function(c){ return !existing[c]; });
+  var sp = STATE.data.spaces.filter(function(s){ return s.SpaceID===spaceId; })[0];
+  var body = '<h3>Add Categories &mdash; '+escapeHtml(sp?sp.Name:'')+'</h3>'+
+    '<div class="field-hint" style="margin-bottom:8px;">Pick whichever task categories apply to this space — each one adds its full task checklist.</div>';
+  if(!available.length){
+    body += '<div class="empty-state">Every category has already been added to this space.</div>'+
+      '<div class="modal-actions"><button class="btn" onclick="closeModal()">Close</button></div>';
+  } else {
+    body += '<div style="display:flex;flex-direction:column;gap:6px;max-height:320px;overflow:auto;">'+
+      available.map(function(c){
+        return '<label style="display:flex;align-items:center;gap:8px;font-size:13px;"><input type="checkbox" class="ac-cat-cb" value="'+escapeHtml(c)+'"> '+escapeHtml(c)+
+          ' <span style="color:var(--ink-soft);font-size:11px;">('+taxonomy[c].length+' tasks)</span></label>';
+      }).join('')+
+      '</div>'+
+      '<div class="modal-actions"><button class="btn" onclick="closeModal()">Cancel</button>'+
+      '<button class="btn primary" onclick="saveAddCategories(\''+spaceId+'\',this)">Add Selected</button></div>';
+  }
+  showModal(body);
+}
+function saveAddCategories(spaceId, btn){
+  if(btn && btn.disabled) return;
+  var cats = Array.from(document.querySelectorAll('.ac-cat-cb:checked')).map(function(cb){ return cb.value; });
+  if(!cats.length){ toast('Pick at least one category'); return; }
+  btnBusy(btn);
+  apiPost('addTaskCategoriesToSpace', { spaceId: spaceId, categories: cats }).then(function(){
+    closeModal(); toast('Categories added'); refresh();
+  }).catch(function(err){ btnReset(btn); showErr(err); });
+}
+function deleteTaskCategoryPrompt(spaceId, category){
+  if(!window.confirm('Remove all "'+category+'" tasks from this space? This cannot be undone.')) return;
+  apiPost('deleteTaskCategory', { spaceId: spaceId, category: category }).then(function(){
+    toast('Category removed'); refresh();
+  }).catch(showErr);
+}
 function attachScheduleHandlers(){
   var grid = document.getElementById('schedGrid');
   if(!grid) return;

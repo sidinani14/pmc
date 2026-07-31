@@ -14,21 +14,21 @@ var STAGES = MATERIAL_STAGES;
 
 // Execution trades — mirrors the user's real "Legends" tab (Rate List agency
 // column). Used by Materials/BOQ for procurement/vendor purposes only —
-// decoupled from the Schedule tab's execution tracking (see TASK_TAXONOMY).
+// decoupled from the Schedule tab's execution tracking (see TAXONOMY).
 var AGENCIES = [
   'Carpentry', 'Flooring', 'Plumbing', 'Painting', 'False Ceiling', 'Fabrication',
   'Windows', 'Electrical', 'Air Conditioning', 'Automation', 'Furnishing',
   'Acoustics', 'Decor', 'Glass work', 'Modular Furniture', 'Sliding profile door'
 ];
 
-// Fixed, ordered execution checklist — every space gets a SCHEDULE_ACTIVITIES
-// row for every task below (replaces Phase 8's flat 27-item checklist with
-// the user's own refined Category -> Task breakdown). Category
-// is stored alongside each activity for grouping in Schedule/Progress
-// Review; the underlying dependency chain stays a single flat sequence in
-// this exact category-then-task order (stage N+1's predecessor is always
-// stage N) — same simple model as before, just richer labeling.
-var TASK_TAXONOMY = {
+// Single taxonomy shared by both the Schedule execution checklist and the
+// Materials Catalog's Category/Subcategory — the user's own refined
+// Category -> Task/Material breakdown (replaces Phase 8's separate 27-item
+// EXECUTION_STAGES list and 11-category materials TAXONOMY, which had
+// diverged from each other). A space's checklist is built by picking a
+// subset of these categories (see addTaskCategoriesToSpace/deleteTaskCategory)
+// rather than every category being auto-seeded.
+var TAXONOMY = {
   'CIVIL WORKS': ['Foundation', 'Column', 'Beam & Slab', 'Brickwork', 'Plaster', 'Waterproofing'],
   'CONCEALED WORKS': ['Electrical Conduiting', 'Plumbing Concealed', 'HVAC', 'Automation & Security'],
   'STONE & TILING WORKS': ['Jamming Works', 'Wall Tilings', 'Flooring', 'Staircase', 'Skirting'],
@@ -42,12 +42,12 @@ var TASK_TAXONOMY = {
   'DECOR': ['Wall Decor', 'Lamps', 'Small Decor', 'Furnishing'],
   'CLEANING AND HANDOVER': ['Cleaning', 'Handover']
 };
-// Flattens TASK_TAXONOMY into an ordered [{category, task}, ...] list —
-// the single source of truth for both seeding order and dependency order.
-function flattenTaskTaxonomy_() {
+// Flattens TAXONOMY into an ordered [{category, task}, ...] list — the
+// single source of truth for both seeding order and dependency order.
+function flattenTaxonomy_() {
   var out = [];
-  Object.keys(TASK_TAXONOMY).forEach(function (cat) {
-    TASK_TAXONOMY[cat].forEach(function (task) { out.push({ category: cat, task: task }); });
+  Object.keys(TAXONOMY).forEach(function (cat) {
+    TAXONOMY[cat].forEach(function (task) { out.push({ category: cat, task: task }); });
   });
   return out;
 }
@@ -58,23 +58,6 @@ function flattenTaskTaxonomy_() {
 // Required'/'Selection Pending' are blocked states shown in their own
 // colors regardless of target date.
 var ACTIVITY_STATUSES = ['Not Started', 'In Progress', 'Done', 'Not Required', 'Revisions Required', 'Selection Pending'];
-
-// Material taxonomy (Phase 8, from the user's real "Sheet24" tab) — replaces
-// the old free-text Category field. Category is one of these 11 keys;
-// Subcategory is one of that key's values.
-var TAXONOMY = {
-  'CIVIL WORKS': ['Foundation', 'Column', 'Beam & Slab', 'Brickwork', 'Plaster', 'Waterproofing'],
-  'CONCEALED WORKS': ['Electrical', 'Plumbing', 'HVAC'],
-  'STONE & TILING WORKS': ['Jamming Works', 'Wall Tilings', 'Flooring', 'Staircase', 'Skirting'],
-  'FALSE CEILING': ['Framing Works', 'Closure'],
-  'PAINT WORKS': ['Interiors', 'Exterior', 'Furniture'],
-  'ELECTRICAL': ['Wiring', 'Switch Socket', 'Lighting & Fixtures'],
-  'CARPENTRY': ['Wall Panel', 'Doors', 'Furniture'],
-  'FABRICATION': ['Windows', 'Railing', 'Gate', 'Duct Covers', 'Staircase', 'Pergola', 'Grill'],
-  'FURNITURE': ['Modular Furniture', 'Loose Furniture'],
-  'FURNISHING': ['Curtains', 'Tapestry', 'Decor'],
-  'HANDOVER': ['Cleaning', 'Closure']
-};
 
 var SHEET_PROP_KEY = 'PMC_SHEET_ID';
 
@@ -626,11 +609,11 @@ function seedDemoProject_(ss) {
     ]);
   });
 
-  // Execution stages: all fixed TASK_TAXONOMY tasks per space, statuses
+  // Execution stages: all fixed TAXONOMY tasks per space, statuses
   // spread realistically across the 6-value vocabulary (Entrance Foyer runs
   // ahead of schedule, Drawing Room behind) — see buildDemoExecutionStatuses_.
   var actSheet = getTab_(ss, 'SCHEDULE_ACTIVITIES');
-  var taskList = flattenTaskTaxonomy_();
+  var taskList = flattenTaxonomy_();
   spaceNames.forEach(function (name) {
     var spaceId = spaceIds[name];
     var mode = name === 'Entrance Foyer' ? 'ahead' : 'behind';
@@ -684,12 +667,12 @@ function seedDemoProject_(ss) {
 
 var DELAY_REASONS_DEMO_ = ['Material Selection Delay', 'Order Placement Delay', 'Material Delivery Delay (Vendor)'];
 
-// One status per flattenTaskTaxonomy_() index (always exactly that many
+// One status per flattenTaxonomy_() index (always exactly that many
 // entries) — a realistic Done/In-Progress/Not-Started prefix-style
 // progression with a couple of the newer statuses (Not Required / Revisions
 // Required / Selection Pending) layered in so the demo shows every color.
 function buildDemoExecutionStatuses_(mode) {
-  var n = flattenTaskTaxonomy_().length;
+  var n = flattenTaxonomy_().length;
   var doneCount = mode === 'ahead' ? Math.round(n * 0.55) : Math.round(n * 0.35);
   var progressCount = mode === 'ahead' ? 3 : 2;
   var statuses = [];
@@ -787,6 +770,7 @@ function doPost(e) {
   var routes = {
     addProject: addProject, updateProject: updateProject, deleteProject: deleteProject, addSpace: addSpace,
     updateSpace: updateSpace, deleteSpace: deleteSpace,
+    addTaskCategoriesToSpace: addTaskCategoriesToSpace, deleteTaskCategory: deleteTaskCategory,
     addMaterial: addMaterial, updateMaterial: updateMaterial,
     addBoqItem: addBoqItem, updateBoqItem: updateBoqItem,
     addBoqImage: addBoqImage, removeBoqImage: removeBoqImage,
@@ -802,7 +786,7 @@ function doPost(e) {
 // ---------- Client-callable API ----------
 
 function getSchema() {
-  return { materialStages: MATERIAL_STAGES, designStages: DESIGN_STAGES, agencies: AGENCIES, taxonomy: TAXONOMY, taskTaxonomy: TASK_TAXONOMY };
+  return { materialStages: MATERIAL_STAGES, designStages: DESIGN_STAGES, agencies: AGENCIES, taxonomy: TAXONOMY };
 }
 
 function normDate_(v) {
@@ -858,7 +842,7 @@ function getAllData() {
   var categories = Object.keys(TAXONOMY);
 
   return {
-    schema: { materialStages: MATERIAL_STAGES, designStages: DESIGN_STAGES, agencies: AGENCIES, categories: categories, taxonomy: TAXONOMY, taskTaxonomy: TASK_TAXONOMY },
+    schema: { materialStages: MATERIAL_STAGES, designStages: DESIGN_STAGES, agencies: AGENCIES, categories: categories, taxonomy: TAXONOMY },
     projects: projects,
     spaces: spaces,
     materialsConfig: materialsConfig,
@@ -947,7 +931,9 @@ function addSpace(payload) {
   var existing = rowsToObjects_(spaceSheet).filter(function (r) { return r.ProjectID === payload.projectId; });
   var sortOrder = existing.length + 1;
   var spaceId = addSpaceInternal_(spaceSheet, payload.projectId, payload.name, sortOrder, payload.floor);
-  seedExecutionStagesForSpace_(ss, payload.projectId, spaceId);
+  // No execution checklist is seeded here — the team picks which TAXONOMY
+  // categories actually apply to this space via addTaskCategoriesToSpace,
+  // instead of every space getting all ~51 tasks whether relevant or not.
   return { spaceId: spaceId };
 }
 
@@ -1047,29 +1033,61 @@ function addBoqItem(payload) {
 
 // ---------- Schedule / execution-stage activities ----------
 
-// Creates all fixed TASK_TAXONOMY task rows for a space upfront (mirrors
-// how Design's stages are pre-seeded) — replaces the old lazy
-// ensureActivityForBoqItem_, which created one activity per (space, Agency)
-// only when a matching BOQ line was added. Dependencies are
-// implicit-sequential: each task's only predecessor is the one before it.
-function seedExecutionStagesForSpace_(ss, projectId, spaceId) {
+// Appends the tasks for whichever TAXONOMY categories the team picks as
+// applicable to this space (categories already present for the space are
+// skipped, so calling this again with a mix of old+new categories is safe).
+// Dependencies stay implicit-sequential — each new task's predecessor is
+// the space's current last task (whichever category that happened to be
+// added in), continuing one running checklist rather than restarting per
+// category.
+function addTaskCategoriesToSpace(payload) {
+  // payload: { spaceId, categories: [categoryName, ...] }
+  var ss = getSS_();
+  var space = rowsToObjects_(getTab_(ss, 'SPACES')).filter(function (s) { return s.SpaceID === payload.spaceId; })[0];
+  if (!space) throw new Error('Space not found');
   var sheet = getTab_(ss, 'SCHEDULE_ACTIVITIES');
+  var existing = rowsToObjects_(sheet).filter(function (a) { return a.SpaceID === payload.spaceId; });
+  var existingCategories = {};
+  existing.forEach(function (a) { existingCategories[a.Category] = true; });
+  var tail = existing.reduce(function (best, a) { return (!best || a.EndDate > best.EndDate) ? a : best; }, null);
+  var prevActivityId = tail ? tail.ActivityID : '';
+  var startDate = tail ? tail.EndDate : daysFromNowISO_(0);
   var now = new Date();
-  var startDate = daysFromNowISO_(0);
-  var prevActivityId = '';
   var rows = [];
-  flattenTaskTaxonomy_().forEach(function (t) {
-    var endDate = addDaysISO_(startDate, 7);
-    var activityId = 'ACT-' + Utilities.getUuid().slice(0, 6);
-    var predecessors = prevActivityId ? [prevActivityId] : [];
-    rows.push([
-      activityId, projectId, spaceId, t.task, startDate, endDate,
-      'Not Started', JSON.stringify(predecessors), '', now, now, 0, startDate, endDate, '', t.category
-    ]);
-    prevActivityId = activityId;
-    startDate = endDate;
+  (payload.categories || []).forEach(function (cat) {
+    if (existingCategories[cat] || !TAXONOMY[cat]) return;
+    TAXONOMY[cat].forEach(function (task) {
+      var endDate = addDaysISO_(startDate, 7);
+      var activityId = 'ACT-' + Utilities.getUuid().slice(0, 6);
+      var predecessors = prevActivityId ? [prevActivityId] : [];
+      rows.push([
+        activityId, space.ProjectID, payload.spaceId, task, startDate, endDate,
+        'Not Started', JSON.stringify(predecessors), '', now, now, 0, startDate, endDate, '', cat
+      ]);
+      prevActivityId = activityId;
+      startDate = endDate;
+    });
+    existingCategories[cat] = true;
   });
-  sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, rows[0].length).setValues(rows);
+  if (rows.length) sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, rows[0].length).setValues(rows);
+  return { added: rows.length };
+}
+
+// Removes every task under one TAXONOMY category for one space — lets the
+// team back out a category they added by mistake, or that turned out not
+// to apply. Only that space's rows for that category are touched.
+function deleteTaskCategory(payload) {
+  // payload: { spaceId, category }
+  var ss = getSS_();
+  var sheet = getTab_(ss, 'SCHEDULE_ACTIVITIES');
+  var values = sheet.getDataRange().getValues();
+  var headers = values[0];
+  var spaceIdx = headers.indexOf('SpaceID');
+  var catIdx = headers.indexOf('Category');
+  for (var i = values.length - 1; i >= 1; i--) {
+    if (values[i][spaceIdx] === payload.spaceId && values[i][catIdx] === payload.category) sheet.deleteRow(i + 1);
+  }
+  return { ok: true };
 }
 
 function addDaysISO_(iso, n) {
