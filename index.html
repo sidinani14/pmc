@@ -1028,7 +1028,14 @@ function saveAddMaterial(spaceId, btn){
     length: length, width: width, depthNos: depthNos, contingency: contingency||0, revisedRate: revisedRate
   }).then(function(res){
     if(res && res.boqItem) STATE.data.boqItems.push(res.boqItem);
-    closeModal(); toast('Added to BOQ'); render();
+    var addedCategory = '';
+    if(res && res.newActivities && res.newActivities.length){
+      STATE.data.activities = STATE.data.activities.concat(res.newActivities);
+      addedCategory = res.newActivities[0].Category;
+    }
+    closeModal();
+    toast(addedCategory ? 'Added to BOQ — "'+addedCategory+'" checklist added to Schedule' : 'Added to BOQ');
+    render();
   }).catch(function(err){ btnReset(btn); showErr(err); });
 }
 

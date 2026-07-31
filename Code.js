@@ -1052,6 +1052,14 @@ function addBoqItem(payload) {
   ]);
   var quantity = length * width * depthNos + contingency;
   var effectiveRate = revisedRate !== '' ? Number(revisedRate) : rate;
+
+  // Auto-add the material's own Category to this space's Schedule checklist
+  // if it isn't already there — planning a material implies its execution
+  // category applies to this space, without waiting for someone to also
+  // remember to add it manually in the Schedule tab. No-ops (returns no new
+  // activities) if that category was already present for this space.
+  var taskResult = addTaskCategoriesToSpace_(ss, payload.spaceId, [material.Category]);
+
   return {
     boqItemId: boqItemId,
     boqItem: {
@@ -1061,26 +1069,28 @@ function addBoqItem(payload) {
       Rate: rate, RevisedRate: revisedRate, Stages: stages, RollupStatus: 'Not Started', Notes: '', Images: [],
       CreatedAt: now.toISOString(), UpdatedAt: now.toISOString(),
       Quantity: quantity, EffectiveRate: effectiveRate, Amount: quantity * effectiveRate
-    }
+    },
+    newActivities: taskResult.activities
   };
 }
 
 // ---------- Schedule / execution-stage activities ----------
 
-// Appends the tasks for whichever TAXONOMY categories the team picks as
-// applicable to this space (categories already present for the space are
-// skipped, so calling this again with a mix of old+new categories is safe).
-// Dependencies stay implicit-sequential — each new task's predecessor is
-// the space's current last task (whichever category that happened to be
-// added in), continuing one running checklist rather than restarting per
-// category.
-function addTaskCategoriesToSpace(payload) {
-  // payload: { spaceId, categories: [categoryName, ...] }
-  var ss = getSS_();
-  var space = rowsToObjects_(getTab_(ss, 'SPACES')).filter(function (s) { return s.SpaceID === payload.spaceId; })[0];
-  if (!space) throw new Error('Space not found');
+// Appends the tasks for whichever TAXONOMY categories apply to this space
+// (categories already present for the space are skipped, so calling this
+// again with a mix of old+new categories is safe). Dependencies stay
+// implicit-sequential — each new task's predecessor is the space's current
+// last task (whichever category that happened to be added in), continuing
+// one running checklist rather than restarting per category. Shared by the
+// manual addTaskCategoriesToSpace action and addBoqItem's auto-add (a
+// material's own Category, added to the space's Schedule the moment that
+// material is added to its BOQ — no date link between the two, the new
+// task just joins the space's existing sequential chain like any other).
+function addTaskCategoriesToSpace_(ss, spaceId, categories) {
+  var space = rowsToObjects_(getTab_(ss, 'SPACES')).filter(function (s) { return s.SpaceID === spaceId; })[0];
+  if (!space) return { added: 0, activities: [] };
   var sheet = getTab_(ss, 'SCHEDULE_ACTIVITIES');
-  var existing = rowsToObjects_(sheet).filter(function (a) { return a.SpaceID === payload.spaceId; });
+  var existing = rowsToObjects_(sheet).filter(function (a) { return a.SpaceID === spaceId; });
   var existingCategories = {};
   existing.forEach(function (a) { existingCategories[a.Category] = true; });
   var tail = existing.reduce(function (best, a) { return (!best || a.EndDate > best.EndDate) ? a : best; }, null);
@@ -1090,18 +1100,18 @@ function addTaskCategoriesToSpace(payload) {
   var nowIso = now.toISOString();
   var rows = [];
   var created = [];
-  (payload.categories || []).forEach(function (cat) {
+  (categories || []).forEach(function (cat) {
     if (existingCategories[cat] || !TAXONOMY[cat]) return;
     TAXONOMY[cat].forEach(function (task) {
       var endDate = addDaysISO_(startDate, 7);
       var activityId = 'ACT-' + Utilities.getUuid().slice(0, 6);
       var predecessors = prevActivityId ? [prevActivityId] : [];
       rows.push([
-        activityId, space.ProjectID, payload.spaceId, task, startDate, endDate,
+        activityId, space.ProjectID, spaceId, task, startDate, endDate,
         'Not Started', JSON.stringify(predecessors), '', now, now, 0, startDate, endDate, '', cat
       ]);
       created.push({
-        ActivityID: activityId, ProjectID: space.ProjectID, SpaceID: payload.spaceId, Agency: task,
+        ActivityID: activityId, ProjectID: space.ProjectID, SpaceID: spaceId, Agency: task,
         StartDate: startDate, EndDate: endDate, Status: 'Not Started', Predecessors: predecessors,
         Notes: '', CreatedAt: nowIso, UpdatedAt: nowIso, PercentComplete: 0,
         OriginalStartDate: startDate, OriginalEndDate: endDate, DelayReason: '', Category: cat
@@ -1113,6 +1123,12 @@ function addTaskCategoriesToSpace(payload) {
   });
   if (rows.length) sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, rows[0].length).setValues(rows);
   return { added: rows.length, activities: created };
+}
+
+function addTaskCategoriesToSpace(payload) {
+  // payload: { spaceId, categories: [categoryName, ...] }
+  var ss = getSS_();
+  return addTaskCategoriesToSpace_(ss, payload.spaceId, payload.categories);
 }
 
 // Removes every task under one TAXONOMY category for one space — lets the
