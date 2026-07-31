@@ -976,11 +976,19 @@ function addMaterial(payload) {
   var sheet = getTab_(ss, 'MATERIALS_CONFIG');
   var existingIds = rowsToObjects_(sheet).map(function (r) { return r.MaterialID; });
   var materialId = nextId_('MAT', existingIds);
+  var now = new Date();
   sheet.appendRow([
     materialId, payload.category, payload.subcategory || '', payload.name, payload.unit,
-    Number(payload.rate) || 0, payload.agency, true, new Date()
+    Number(payload.rate) || 0, payload.agency, true, now
   ]);
-  return { materialId: materialId };
+  return {
+    materialId: materialId,
+    material: {
+      MaterialID: materialId, Category: payload.category, Subcategory: payload.subcategory || '',
+      Name: payload.name, Unit: payload.unit, Rate: Number(payload.rate) || 0, Agency: payload.agency,
+      Active: true, CreatedAt: now.toISOString()
+    }
+  };
 }
 
 function updateMaterial(payload) {
@@ -1028,7 +1036,19 @@ function addBoqItem(payload) {
     material.Unit, length, width, depthNos, contingency, rate, revisedRate,
     JSON.stringify(stages), 'Not Started', '', '[]', now, now
   ]);
-  return { boqItemId: boqItemId };
+  var quantity = length * width * depthNos + contingency;
+  var effectiveRate = revisedRate !== '' ? Number(revisedRate) : rate;
+  return {
+    boqItemId: boqItemId,
+    boqItem: {
+      BoqItemID: boqItemId, ProjectID: payload.projectId, SpaceID: payload.spaceId, MaterialID: material.MaterialID,
+      MaterialName: material.Name, Category: material.Category, Subcategory: material.Subcategory, Agency: material.Agency,
+      Unit: material.Unit, Length: length, Width: width, DepthNos: depthNos, Contingency: contingency,
+      Rate: rate, RevisedRate: revisedRate, Stages: stages, RollupStatus: 'Not Started', Notes: '', Images: [],
+      CreatedAt: now.toISOString(), UpdatedAt: now.toISOString(),
+      Quantity: quantity, EffectiveRate: effectiveRate, Amount: quantity * effectiveRate
+    }
+  };
 }
 
 // ---------- Schedule / execution-stage activities ----------
@@ -1053,7 +1073,9 @@ function addTaskCategoriesToSpace(payload) {
   var prevActivityId = tail ? tail.ActivityID : '';
   var startDate = tail ? tail.EndDate : daysFromNowISO_(0);
   var now = new Date();
+  var nowIso = now.toISOString();
   var rows = [];
+  var created = [];
   (payload.categories || []).forEach(function (cat) {
     if (existingCategories[cat] || !TAXONOMY[cat]) return;
     TAXONOMY[cat].forEach(function (task) {
@@ -1064,13 +1086,19 @@ function addTaskCategoriesToSpace(payload) {
         activityId, space.ProjectID, payload.spaceId, task, startDate, endDate,
         'Not Started', JSON.stringify(predecessors), '', now, now, 0, startDate, endDate, '', cat
       ]);
+      created.push({
+        ActivityID: activityId, ProjectID: space.ProjectID, SpaceID: payload.spaceId, Agency: task,
+        StartDate: startDate, EndDate: endDate, Status: 'Not Started', Predecessors: predecessors,
+        Notes: '', CreatedAt: nowIso, UpdatedAt: nowIso, PercentComplete: 0,
+        OriginalStartDate: startDate, OriginalEndDate: endDate, DelayReason: '', Category: cat
+      });
       prevActivityId = activityId;
       startDate = endDate;
     });
     existingCategories[cat] = true;
   });
   if (rows.length) sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, rows[0].length).setValues(rows);
-  return { added: rows.length };
+  return { added: rows.length, activities: created };
 }
 
 // Removes every task under one TAXONOMY category for one space — lets the

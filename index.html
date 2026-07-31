@@ -1010,8 +1010,9 @@ function saveAddMaterial(spaceId, btn){
   apiPost('addBoqItem', {
     projectId: STATE.currentProjectId, spaceId: spaceId, materialId: materialId,
     length: length, width: width, depthNos: depthNos, contingency: contingency||0, revisedRate: revisedRate
-  }).then(function(){
-    closeModal(); toast('Added to BOQ'); refresh();
+  }).then(function(res){
+    if(res && res.boqItem) STATE.data.boqItems.push(res.boqItem);
+    closeModal(); toast('Added to BOQ'); render();
   }).catch(function(err){ btnReset(btn); showErr(err); });
 }
 
@@ -1198,14 +1199,16 @@ function saveAddCategories(spaceId, btn){
   var cats = Array.from(document.querySelectorAll('.ac-cat-cb:checked')).map(function(cb){ return cb.value; });
   if(!cats.length){ toast('Pick at least one category'); return; }
   btnBusy(btn);
-  apiPost('addTaskCategoriesToSpace', { spaceId: spaceId, categories: cats }).then(function(){
-    closeModal(); toast('Categories added'); refresh();
+  apiPost('addTaskCategoriesToSpace', { spaceId: spaceId, categories: cats }).then(function(res){
+    if(res && res.activities && res.activities.length) STATE.data.activities = STATE.data.activities.concat(res.activities);
+    closeModal(); toast('Categories added'); render();
   }).catch(function(err){ btnReset(btn); showErr(err); });
 }
 function deleteTaskCategoryPrompt(spaceId, category){
   if(!window.confirm('Remove all "'+category+'" tasks from this space? This cannot be undone.')) return;
   apiPost('deleteTaskCategory', { spaceId: spaceId, category: category }).then(function(){
-    toast('Category removed'); refresh();
+    STATE.data.activities = STATE.data.activities.filter(function(a){ return !(a.SpaceID===spaceId && a.Category===category); });
+    toast('Category removed'); render();
   }).catch(showErr);
 }
 function attachScheduleHandlers(){
@@ -2077,8 +2080,9 @@ function saveNewMaterial(btn){
   };
   if(!payload.category || !payload.name || !payload.unit){ toast('Category, name and unit are required'); return; }
   btnBusy(btn);
-  apiPost('addMaterial', payload).then(function(){
-    closeModal(); toast('Material added'); refresh();
+  apiPost('addMaterial', payload).then(function(res){
+    if(res && res.material) STATE.data.materialsConfig.push(res.material);
+    closeModal(); toast('Material added'); render();
   }).catch(function(err){ btnReset(btn); showErr(err); });
 }
 
