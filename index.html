@@ -364,6 +364,13 @@ function fmtMoney(n){
   n = Number(n)||0;
   return '₹' + n.toLocaleString('en-IN');
 }
+// Default capitalization for project/space names — first letter of each
+// word, rest of the word left as typed (so an intentional acronym like "TV
+// Unit" or "PU Paint" survives; this only fixes the common "typed it all
+// lowercase" case, it doesn't force a full title-case transform).
+function titleCase(s){
+  return String(s||'').replace(/\S+/g, function(w){ return w.charAt(0).toUpperCase() + w.slice(1); });
+}
 function escapeHtml(s){
   return String(s==null?'':s).replace(/[&<>"']/g, function(c){
     return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
@@ -1817,7 +1824,7 @@ function saveProjectMeta(btn){
   if(btn && btn.disabled) return;
   var payload = {
     projectId: STATE.currentProjectId,
-    name: document.getElementById('mg-name').value,
+    name: titleCase(document.getElementById('mg-name').value),
     address: document.getElementById('mg-addr').value,
     startDate: document.getElementById('mg-start').value,
     targetMoveIn: document.getElementById('mg-move').value,
@@ -1837,8 +1844,8 @@ function deleteProjectConfirm(projectId, projectName, btn){
     toast('Project deleted');
     return apiGet('getAllData').then(function(data){
       STATE.data = data;
-      STATE.currentProjectId = (data.projects[0] && data.projects[0].ProjectID) || null;
-      STATE.currentTab = defaultTabForRole();
+      STATE.currentProjectId = null;
+      STATE.currentTab = null;
       render();
       syncUrl();
     });
@@ -1847,7 +1854,7 @@ function deleteProjectConfirm(projectId, projectName, btn){
 function renameSpacePrompt(spaceId, currentName){
   var name = window.prompt('Rename space', currentName);
   if(name===null) return;
-  name = name.trim();
+  name = titleCase(name.trim());
   if(!name || name===currentName) return;
   apiPost('updateSpace', { spaceId: spaceId, name: name }).then(function(){
     toast('Space renamed'); refresh();
@@ -1863,8 +1870,8 @@ function deleteSpacePrompt(spaceId, name, btn){
 }
 function addSpaceToProject(btn){
   if(btn && btn.disabled) return;
-  var name = document.getElementById('mg-newspace').value.trim();
-  var floor = document.getElementById('mg-newspace-floor').value.trim();
+  var name = titleCase(document.getElementById('mg-newspace').value.trim());
+  var floor = titleCase(document.getElementById('mg-newspace-floor').value.trim());
   if(!name){ toast('Enter a space name'); return; }
   btnBusy(btn);
   apiPost('addSpace', { projectId: STATE.currentProjectId, name: name, floor: floor }).then(function(){
@@ -2059,7 +2066,7 @@ function renderSpaceChips(){
 }
 function addNPSpace(){
   var input = document.getElementById('np-newspace');
-  var v = input.value.trim();
+  var v = titleCase(input.value.trim());
   if(!v) return;
   newProjectSpaces.push(v);
   input.value='';
@@ -2071,7 +2078,7 @@ function removeNPSpace(i){
 }
 function createProject(btn){
   if(btn && btn.disabled) return;
-  var name = document.getElementById('np-name').value.trim();
+  var name = titleCase(document.getElementById('np-name').value.trim());
   if(!name){ toast('Project name is required'); return; }
   var payload = {
     name: name,
