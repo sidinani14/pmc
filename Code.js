@@ -14,27 +14,43 @@ var STAGES = MATERIAL_STAGES;
 
 // Execution trades — mirrors the user's real "Legends" tab (Rate List agency
 // column). Used by Materials/BOQ for procurement/vendor purposes only —
-// decoupled from the Schedule tab's execution tracking (see EXECUTION_STAGES).
+// decoupled from the Schedule tab's execution tracking (see TASK_TAXONOMY).
 var AGENCIES = [
   'Carpentry', 'Flooring', 'Plumbing', 'Painting', 'False Ceiling', 'Fabrication',
   'Windows', 'Electrical', 'Air Conditioning', 'Automation', 'Furnishing',
   'Acoustics', 'Decor', 'Glass work', 'Modular Furniture', 'Sliding profile door'
 ];
 
-// Fixed, ordered execution checklist — every space gets exactly these 27
-// SCHEDULE_ACTIVITIES rows (Phase 8, from the user's real
-// "IDS_DEEPAK_280426" site-tracking sheet), replacing the old dynamic
-// Agency-driven Schedule. Order matters: dependencies are implicit-sequential
-// (stage N+1's predecessor is always stage N).
-var EXECUTION_STAGES = [
-  'Electrical Conduiting', 'Plumbing Piping Work', 'HVAC', 'Automation & Security',
-  'Plasterwork', 'Waterproofing', 'DW Jamming', 'Wall Tiling', 'Flooring',
-  'False Ceiling Frame Work', 'Electrical Wiring', 'False Ceiling Enclosure',
-  'Lighting Fixtures Cutout', 'Putty Work', 'Switchboards', 'Marble Polishing',
-  'Door Installation', 'Wall Panelling Basework', 'Furniture Finishes',
-  'Veneer Polishing/PU', 'Fabrication', 'Paint Works', 'Decor', 'Modular Furniture',
-  'Curtains/Furnishing', 'Cleaning', 'Handover'
-];
+// Fixed, ordered execution checklist — every space gets a SCHEDULE_ACTIVITIES
+// row for every task below (replaces Phase 8's flat 27-item checklist with
+// the user's own refined Category -> Task breakdown). Category
+// is stored alongside each activity for grouping in Schedule/Progress
+// Review; the underlying dependency chain stays a single flat sequence in
+// this exact category-then-task order (stage N+1's predecessor is always
+// stage N) — same simple model as before, just richer labeling.
+var TASK_TAXONOMY = {
+  'CIVIL WORKS': ['Foundation', 'Column', 'Beam & Slab', 'Brickwork', 'Plaster', 'Waterproofing'],
+  'CONCEALED WORKS': ['Electrical Conduiting', 'Plumbing Concealed', 'HVAC', 'Automation & Security'],
+  'STONE & TILING WORKS': ['Jamming Works', 'Wall Tilings', 'Flooring', 'Staircase', 'Skirting'],
+  'FALSE CEILING': ['Framing Works', 'Enclosure', 'Lighting Fixtures Cutouts'],
+  'PAINT WORKS': ['Putty Works', 'Wall Painting', 'Veneer Polishing/PU'],
+  'CARPENTRY': ['DW Jamming', 'Wall Panelling Base', 'Wall Panelling Finishes', 'Door Installation', 'Furniture'],
+  'ELECTRICAL': ['Wiring', 'Switchboards', 'Lighting', 'Fans', 'Appliances'],
+  'PLUMBING': ['Sanitary Fittings'],
+  'MISC.': ['Window Installation', 'Marble Polishing', 'Fabrication'],
+  'MODULAR FURNITURE': ['Bed', 'Side Table', 'Console', 'TV Unit', 'Cabinet', 'Wardrobe', 'Kitchen', 'Sofa', 'Dining Table', 'Centre Table'],
+  'DECOR': ['Wall Decor', 'Lamps', 'Small Decor', 'Furnishing'],
+  'CLEANING AND HANDOVER': ['Cleaning', 'Handover']
+};
+// Flattens TASK_TAXONOMY into an ordered [{category, task}, ...] list —
+// the single source of truth for both seeding order and dependency order.
+function flattenTaskTaxonomy_() {
+  var out = [];
+  Object.keys(TASK_TAXONOMY).forEach(function (cat) {
+    TASK_TAXONOMY[cat].forEach(function (task) { out.push({ category: cat, task: task }); });
+  });
+  return out;
+}
 
 // Execution-stage status vocabulary (Phase 8) — six values, from the same
 // source sheet. 'Not Required' behaves like 'N/A' does for Design/Material
@@ -66,6 +82,10 @@ var SHEET_PROP_KEY = 'PMC_SHEET_ID';
 // Extracted from the user's real "NAGAR HOUSE Interior Estimate.xlsx" (Rate List
 // tab, 2026-07-28) — real materials, units and rates, not placeholders. Agency
 // per Rate-List category, per the approved plan (editable afterwards in the UI).
+// 10 further items from "Material rate list.pdf" (2026-07-31) were appended
+// directly to the live MATERIALS_CONFIG sheet via a one-time import (the
+// other 127 rows in that PDF were exact name/rate matches already covered
+// below, so this seed array was left as-is).
 var MATERIALS_SEED = [
   { category: 'CARPENTRY', subcategory: 'Wall Panel', name: '12mm Ply', unit: 'Sq. Ft', rate: 50, agency: 'Carpentry' },
   { category: 'CARPENTRY', subcategory: 'Wall Panel', name: '19mm Ply', unit: 'Sq. Ft', rate: 80, agency: 'Carpentry' },
@@ -357,7 +377,7 @@ var TABS = {
     name: 'SCHEDULE_ACTIVITIES',
     headers: [
       'ActivityID', 'ProjectID', 'SpaceID', 'Agency', 'StartDate', 'EndDate', 'Status', 'PredecessorsJSON',
-      'Notes', 'CreatedAt', 'UpdatedAt', 'PercentComplete', 'OriginalStartDate', 'OriginalEndDate', 'DelayReason'
+      'Notes', 'CreatedAt', 'UpdatedAt', 'PercentComplete', 'OriginalStartDate', 'OriginalEndDate', 'DelayReason', 'Category'
     ]
   }
 };
@@ -403,6 +423,7 @@ function getTab_(ss, key) {
     ensureColumn_(sh, 'OriginalStartDate', '');
     ensureColumn_(sh, 'OriginalEndDate', '');
     ensureColumn_(sh, 'DelayReason', '');
+    ensureColumn_(sh, 'Category', '');
   } else if (key === 'DAILY_LOG') {
     ensureColumn_(sh, 'UpdatesJSON', '[]');
   } else if (key === 'BOQ_ITEMS') {
@@ -518,11 +539,15 @@ function clearDataRows_(sheet) {
 
 function migrateToBoq() {
   var ss = getSS_();
-  // Sheets whose column layout changed structurally get deleted and let
-  // getTab_ recreate them with the current header row, rather than just
-  // clearing data rows under a stale header (Phase 6: BOQ_ITEMS L/W/D
-  // rework; Phase 8: SPACES gains Floor, MATERIALS_CONFIG/BOQ_ITEMS gain
-  // Subcategory).
+  // WARNING: this function deletes and recreates BOQ_ITEMS/SPACES/
+  // MATERIALS_CONFIG, and clears PROJECTS/DAILY_LOG/SCHEDULE_ACTIVITIES
+  // data rows entirely. It must NOT be called now that real project data
+  // exists in the sheet (team testing began — see Poorvi's projects) —
+  // doing so would destroy that data. Any further schema change to these
+  // sheets must go through the non-destructive ensureColumn_ self-heal
+  // path in getTab_ instead (new columns always land at the physical end
+  // of the sheet — keep TABS.*.headers' declared order matching that, i.e.
+  // append new fields to the end of the headers array, not the middle).
   ['TRACKER', 'CASHFLOW', 'BOQ_ITEMS', 'SPACES', 'MATERIALS_CONFIG'].forEach(function (name) {
     var sh = ss.getSheetByName(name);
     if (sh) ss.deleteSheet(sh);
@@ -601,17 +626,18 @@ function seedDemoProject_(ss) {
     ]);
   });
 
-  // Execution stages: all 27 fixed EXECUTION_STAGES per space, statuses
+  // Execution stages: all fixed TASK_TAXONOMY tasks per space, statuses
   // spread realistically across the 6-value vocabulary (Entrance Foyer runs
   // ahead of schedule, Drawing Room behind) — see buildDemoExecutionStatuses_.
   var actSheet = getTab_(ss, 'SCHEDULE_ACTIVITIES');
+  var taskList = flattenTaskTaxonomy_();
   spaceNames.forEach(function (name) {
     var spaceId = spaceIds[name];
     var mode = name === 'Entrance Foyer' ? 'ahead' : 'behind';
     var statuses = buildDemoExecutionStatuses_(mode);
     var prevActivityId = '';
     var cursor = daysAgoISO_(90);
-    EXECUTION_STAGES.forEach(function (stageName, i) {
+    taskList.forEach(function (t, i) {
       var status = statuses[i];
       var originalStart = cursor;
       var originalEnd = addDaysISO_(originalStart, 7);
@@ -633,8 +659,8 @@ function seedDemoProject_(ss) {
       var activityId = 'ACT-' + Utilities.getUuid().slice(0, 6);
       var predecessors = prevActivityId ? [prevActivityId] : [];
       actSheet.appendRow([
-        activityId, projectId, spaceId, stageName, startDate, endDate, status,
-        JSON.stringify(predecessors), '', now, now, percentComplete, originalStart, originalEnd, delayReason
+        activityId, projectId, spaceId, t.task, startDate, endDate, status,
+        JSON.stringify(predecessors), '', now, now, percentComplete, originalStart, originalEnd, delayReason, t.category
       ]);
       prevActivityId = activityId;
       cursor = originalEnd;
@@ -658,12 +684,12 @@ function seedDemoProject_(ss) {
 
 var DELAY_REASONS_DEMO_ = ['Material Selection Delay', 'Order Placement Delay', 'Material Delivery Delay (Vendor)'];
 
-// One status per EXECUTION_STAGES index (always exactly 27 entries) — a
-// realistic Done/In-Progress/Not-Started prefix-style progression with a
-// couple of the newer statuses (Not Required / Revisions Required /
-// Selection Pending) layered in so the demo shows every color.
+// One status per flattenTaskTaxonomy_() index (always exactly that many
+// entries) — a realistic Done/In-Progress/Not-Started prefix-style
+// progression with a couple of the newer statuses (Not Required / Revisions
+// Required / Selection Pending) layered in so the demo shows every color.
 function buildDemoExecutionStatuses_(mode) {
-  var n = EXECUTION_STAGES.length;
+  var n = flattenTaskTaxonomy_().length;
   var doneCount = mode === 'ahead' ? Math.round(n * 0.55) : Math.round(n * 0.35);
   var progressCount = mode === 'ahead' ? 3 : 2;
   var statuses = [];
@@ -676,7 +702,7 @@ function buildDemoExecutionStatuses_(mode) {
     statuses[2] = 'Not Required';
     statuses[doneCount + progressCount] = 'Selection Pending';
   } else {
-    statuses[15] = 'Not Required';
+    statuses[doneCount + progressCount + 5] = 'Not Required';
     statuses[doneCount + progressCount] = 'Revisions Required';
   }
   return statuses;
@@ -759,7 +785,8 @@ function doPost(e) {
   var data;
   try { data = JSON.parse(raw || '{}'); } catch (err) { return respond_({ ok: false, error: 'Bad JSON body' }); }
   var routes = {
-    addProject: addProject, updateProject: updateProject, addSpace: addSpace,
+    addProject: addProject, updateProject: updateProject, deleteProject: deleteProject, addSpace: addSpace,
+    updateSpace: updateSpace, deleteSpace: deleteSpace,
     addMaterial: addMaterial, updateMaterial: updateMaterial,
     addBoqItem: addBoqItem, updateBoqItem: updateBoqItem,
     addBoqImage: addBoqImage, removeBoqImage: removeBoqImage,
@@ -775,7 +802,7 @@ function doPost(e) {
 // ---------- Client-callable API ----------
 
 function getSchema() {
-  return { materialStages: MATERIAL_STAGES, designStages: DESIGN_STAGES, agencies: AGENCIES, taxonomy: TAXONOMY };
+  return { materialStages: MATERIAL_STAGES, designStages: DESIGN_STAGES, agencies: AGENCIES, taxonomy: TAXONOMY, taskTaxonomy: TASK_TAXONOMY };
 }
 
 function normDate_(v) {
@@ -831,7 +858,7 @@ function getAllData() {
   var categories = Object.keys(TAXONOMY);
 
   return {
-    schema: { materialStages: MATERIAL_STAGES, designStages: DESIGN_STAGES, agencies: AGENCIES, categories: categories, taxonomy: TAXONOMY },
+    schema: { materialStages: MATERIAL_STAGES, designStages: DESIGN_STAGES, agencies: AGENCIES, categories: categories, taxonomy: TAXONOMY, taskTaxonomy: TASK_TAXONOMY },
     projects: projects,
     spaces: spaces,
     materialsConfig: materialsConfig,
@@ -857,6 +884,34 @@ function addProject(payload) {
     addSpaceInternal_(spaceSheet, projectId, name, idx + 1);
   });
   return { projectId: projectId };
+}
+
+// Deletes every row across the sheet whose colName matches value — used to
+// cascade-delete a project's own Spaces/BOQ/Schedule/Log rows. Iterates
+// bottom-to-top so deleting a row never shifts the index of rows not yet
+// visited. MATERIALS_CONFIG is never touched here — it's a shared catalog,
+// not owned by any one project.
+function deleteRowsWhere_(sheet, colName, value) {
+  var values = sheet.getDataRange().getValues();
+  var headers = values[0];
+  var colIdx = headers.indexOf(colName);
+  if (colIdx < 0) return;
+  for (var i = values.length - 1; i >= 1; i--) {
+    if (values[i][colIdx] === value) sheet.deleteRow(i + 1);
+  }
+}
+
+function deleteProject(payload) {
+  var ss = getSS_();
+  var projSheet = getTab_(ss, 'PROJECTS');
+  var row = findRowById_(projSheet, 'ProjectID', payload.projectId);
+  if (row < 0) throw new Error('Project not found');
+  projSheet.deleteRow(row);
+  deleteRowsWhere_(getTab_(ss, 'SPACES'), 'ProjectID', payload.projectId);
+  deleteRowsWhere_(getTab_(ss, 'BOQ_ITEMS'), 'ProjectID', payload.projectId);
+  deleteRowsWhere_(getTab_(ss, 'SCHEDULE_ACTIVITIES'), 'ProjectID', payload.projectId);
+  deleteRowsWhere_(getTab_(ss, 'DAILY_LOG'), 'ProjectID', payload.projectId);
+  return { ok: true };
 }
 
 function updateProject(payload) {
@@ -894,6 +949,37 @@ function addSpace(payload) {
   var spaceId = addSpaceInternal_(spaceSheet, payload.projectId, payload.name, sortOrder, payload.floor);
   seedExecutionStagesForSpace_(ss, payload.projectId, spaceId);
   return { spaceId: spaceId };
+}
+
+function updateSpace(payload) {
+  // payload: { spaceId, name?, floor? }
+  var ss = getSS_();
+  var sheet = getTab_(ss, 'SPACES');
+  var row = findRowById_(sheet, 'SpaceID', payload.spaceId);
+  if (row < 0) throw new Error('Space not found');
+  var headers = sheet.getDataRange().getValues()[0];
+  var idx = {};
+  headers.forEach(function (h, i) { idx[h] = i; });
+  var current = sheet.getRange(row, 1, 1, headers.length).getValues()[0];
+  if (payload.name !== undefined && payload.name !== '') current[idx.Name] = payload.name;
+  if (payload.floor !== undefined) current[idx.Floor] = payload.floor;
+  sheet.getRange(row, 1, 1, headers.length).setValues([current]);
+  return { ok: true };
+}
+
+// Cascade-deletes a single space and everything scoped to it (its BOQ
+// lines, schedule activities, daily logs) — the rest of the project is
+// untouched. MATERIALS_CONFIG is a shared catalog and is never touched.
+function deleteSpace(payload) {
+  var ss = getSS_();
+  var sheet = getTab_(ss, 'SPACES');
+  var row = findRowById_(sheet, 'SpaceID', payload.spaceId);
+  if (row < 0) throw new Error('Space not found');
+  sheet.deleteRow(row);
+  deleteRowsWhere_(getTab_(ss, 'BOQ_ITEMS'), 'SpaceID', payload.spaceId);
+  deleteRowsWhere_(getTab_(ss, 'SCHEDULE_ACTIVITIES'), 'SpaceID', payload.spaceId);
+  deleteRowsWhere_(getTab_(ss, 'DAILY_LOG'), 'SpaceID', payload.spaceId);
+  return { ok: true };
 }
 
 // ---------- Materials catalog CRUD ----------
@@ -961,24 +1047,24 @@ function addBoqItem(payload) {
 
 // ---------- Schedule / execution-stage activities ----------
 
-// Creates all 27 fixed EXECUTION_STAGES rows for a space upfront (mirrors
+// Creates all fixed TASK_TAXONOMY task rows for a space upfront (mirrors
 // how Design's stages are pre-seeded) — replaces the old lazy
 // ensureActivityForBoqItem_, which created one activity per (space, Agency)
 // only when a matching BOQ line was added. Dependencies are
-// implicit-sequential: each stage's only predecessor is the one before it.
+// implicit-sequential: each task's only predecessor is the one before it.
 function seedExecutionStagesForSpace_(ss, projectId, spaceId) {
   var sheet = getTab_(ss, 'SCHEDULE_ACTIVITIES');
   var now = new Date();
   var startDate = daysFromNowISO_(0);
   var prevActivityId = '';
   var rows = [];
-  EXECUTION_STAGES.forEach(function (stageName) {
+  flattenTaskTaxonomy_().forEach(function (t) {
     var endDate = addDaysISO_(startDate, 7);
     var activityId = 'ACT-' + Utilities.getUuid().slice(0, 6);
     var predecessors = prevActivityId ? [prevActivityId] : [];
     rows.push([
-      activityId, projectId, spaceId, stageName, startDate, endDate,
-      'Not Started', JSON.stringify(predecessors), '', now, now, 0, startDate, endDate, ''
+      activityId, projectId, spaceId, t.task, startDate, endDate,
+      'Not Started', JSON.stringify(predecessors), '', now, now, 0, startDate, endDate, '', t.category
     ]);
     prevActivityId = activityId;
     startDate = endDate;

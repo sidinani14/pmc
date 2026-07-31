@@ -396,6 +396,26 @@ function toast(msg){
   t.classList.add('show');
   setTimeout(function(){ t.classList.remove('show'); }, 2600);
 }
+// Guards a save/submit button against double-clicks and gives instant
+// feedback (disabled + "Saving…" the moment it's clicked, "Saved" once the
+// request resolves) so a slow network doesn't read as "nothing happened"
+// and invite a re-click that creates a duplicate record.
+function btnBusy(btn){
+  if(!btn) return;
+  btn.disabled = true;
+  if(btn.dataset.label===undefined) btn.dataset.label = btn.textContent;
+  btn.textContent = 'Saving…';
+}
+function btnSaved(btn){
+  if(!btn) return;
+  btn.textContent = 'Saved ✓';
+  setTimeout(function(){ btn.disabled = false; btn.textContent = btn.dataset.label; }, 900);
+}
+function btnReset(btn){
+  if(!btn) return;
+  btn.disabled = false;
+  btn.textContent = btn.dataset.label;
+}
 
 // ============================= DERIVED HELPERS =============================
 function spacesOf(projectId){
@@ -851,7 +871,7 @@ function openAddMaterialModal(spaceId){
     '</div>'+
     '<div class="field-hint">Quantity: <b id="am-qty-preview">&mdash;</b> &middot; Amount: <b id="am-amount">&mdash;</b></div>'+
     '<div class="modal-actions"><button class="btn" onclick="closeModal()">Cancel</button>'+
-    '<button class="btn primary" onclick="saveAddMaterial(\''+spaceId+'\')">Add to BOQ</button></div>';
+    '<button class="btn primary" onclick="saveAddMaterial(\''+spaceId+'\',this)">Add to BOQ</button></div>';
   showModal(body);
   renderAmMaterialOptions();
 }
@@ -920,7 +940,8 @@ function renderAmAmount(){
   document.getElementById('am-qty-preview').textContent = qty;
   document.getElementById('am-amount').textContent = fmtMoney(qty*rate);
 }
-function saveAddMaterial(spaceId){
+function saveAddMaterial(spaceId, btn){
+  if(btn && btn.disabled) return;
   var materialId = document.getElementById('am-material').value;
   var length = document.getElementById('am-length').value;
   var width = document.getElementById('am-width').value;
@@ -929,12 +950,13 @@ function saveAddMaterial(spaceId){
   var revisedRate = document.getElementById('am-revrate').value;
   if(!materialId){ toast('Pick a material'); return; }
   if((Number(length)*Number(width)*Number(depthNos) + Number(contingency||0)) <= 0){ toast('Enter a measurement'); return; }
+  btnBusy(btn);
   apiPost('addBoqItem', {
     projectId: STATE.currentProjectId, spaceId: spaceId, materialId: materialId,
     length: length, width: width, depthNos: depthNos, contingency: contingency||0, revisedRate: revisedRate
   }).then(function(){
     closeModal(); toast('Added to BOQ'); refresh();
-  }).catch(showErr);
+  }).catch(function(err){ btnReset(btn); showErr(err); });
 }
 
 // ============================= SCHEDULE / PERT CHART =============================
@@ -1458,7 +1480,7 @@ function renderDailyView(){
       '<div class="field" style="display:flex;align-items:flex-end;"><label style="display:flex;align-items:center;gap:7px;margin:0;">'+
         '<input type="checkbox" id="dl-blocker" style="width:auto;"> Flag as blocker / issue</label></div>'+
     '</div>'+
-    '<button class="btn primary" onclick="submitDailyLog()">Save Entry</button>'+
+    '<button class="btn primary" id="dl-submit-btn" onclick="submitDailyLog(this)">Save Entry</button>'+
     '</div>';
 
   var feedHtml = '<div class="section-title">History</div><div class="log-feed">';
@@ -1558,7 +1580,8 @@ function renderDailyActivityRows(){
   html += '<div class="field"><label>Additional notes (optional)</label><textarea id="dl-notes" placeholder="Anything else worth flagging..."></textarea></div>';
   container.innerHTML = html;
 }
-function submitDailyLog(){
+function submitDailyLog(btn){
+  if(btn && btn.disabled) return;
   var by = document.getElementById('dl-by').value.trim();
   if(!by){ toast('Please add your name'); return; }
   localStorage.setItem('pmc_logged_by', by);
@@ -1580,13 +1603,14 @@ function submitDailyLog(){
     });
     var orderPlacements = Array.from(orderEls).map(function(cb){ return { agency: cb.value, done: true }; });
     var notesEl = document.getElementById('dl-notes');
+    btnBusy(btn);
     apiPost('submitActivityUpdates', {
       date: date, projectId: STATE.currentProjectId, spaceId: spaceId, loggedBy: by,
       hasBlocker: hasBlocker, notes: notesEl?notesEl.value.trim():'', designStageDone: designStageDone,
       updates: updates, orderPlacements: orderPlacements
     }).then(function(){
       toast('Logged'); refresh();
-    }).catch(showErr);
+    }).catch(function(err){ btnReset(btn); showErr(err); });
     return;
   }
 
@@ -1594,9 +1618,10 @@ function submitDailyLog(){
   var entry = entryEl ? entryEl.value.trim() : '';
   if(!entry){ toast('Please add what got done today'); return; }
   var payload = { date: date, projectId: STATE.currentProjectId, spaceId: spaceId, entry: entry, loggedBy: by, hasBlocker: hasBlocker };
+  btnBusy(btn);
   apiPost('addDailyLog', payload).then(function(){
     toast('Logged'); refresh();
-  }).catch(showErr);
+  }).catch(function(err){ btnReset(btn); showErr(err); });
 }
 
 // ============================= PROGRESS REPORT =============================
@@ -1717,27 +1742,36 @@ function renderManageView(){
       '<div class="field"><label>Overall Budget</label><input type="number" id="mg-budget" value="'+(p.Budget||0)+'"></div>'+
       '<div class="field"><label>Client Name</label><input id="mg-client" value="'+escapeHtml(p.ClientName||'')+'"></div>'+
     '</div>'+
-    '<button class="btn primary" onclick="saveProjectMeta()">Save Changes</button>'+
+    '<button class="btn primary" onclick="saveProjectMeta(this)">Save Changes</button>'+
     '</div>';
 
-  html += '<div class="card" style="max-width:560px;"><h3>Spaces</h3>';
+  html += '<div class="card" style="max-width:560px;margin-bottom:18px;border-color:var(--vs-red,#c0392b);">'+
+    '<h3>Delete Project</h3>'+
+    '<div style="font-size:12.5px;color:var(--ink-soft);margin-bottom:10px;">Permanently removes this project and all its spaces, BOQ lines, schedule activities, and daily logs. This cannot be undone.</div>'+
+    '<button class="btn" style="border-color:#c0392b;color:#c0392b;" onclick="deleteProjectConfirm(\''+pid+'\',\''+escapeHtml(p.Name).replace(/'/g,"\\'")+'\',this)">Delete Project</button>'+
+    '</div>';
+
+  html += '<div class="card" style="max-width:560px;"><h3>Spaces</h3>'+
+    '<div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:6px;">Click a space to rename it, or &times; to delete it.</div>';
   var hasFloors = spaces.some(function(s){ return s.Floor; });
+  function spaceChipHtml(s){
+    return '<div class="chip-remove" style="cursor:pointer;" onclick="renameSpacePrompt(\''+s.SpaceID+'\',\''+escapeHtml(s.Name).replace(/'/g,"\\'")+'\')" title="Click to rename">'+escapeHtml(s.Name)+
+      ' <button onclick="event.stopPropagation();deleteSpacePrompt(\''+s.SpaceID+'\',\''+escapeHtml(s.Name).replace(/'/g,"\\'")+'\',this)" title="Delete space">&times;</button></div>';
+  }
   if(hasFloors){
     var byFloor = {};
     spaces.forEach(function(s){ var f = s.Floor||'(No Floor)'; (byFloor[f]=byFloor[f]||[]).push(s); });
     Object.keys(byFloor).forEach(function(floor){
       html += '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:var(--ink-soft);margin:8px 0 4px;">'+escapeHtml(floor)+'</div>';
-      byFloor[floor].forEach(function(s){ html += '<div class="chip-remove">'+escapeHtml(s.Name)+'</div>'; });
+      byFloor[floor].forEach(function(s){ html += spaceChipHtml(s); });
     });
   } else {
-    spaces.forEach(function(s){
-      html += '<div class="chip-remove">'+escapeHtml(s.Name)+'</div>';
-    });
+    spaces.forEach(function(s){ html += spaceChipHtml(s); });
   }
   html += '<div class="space-adder" style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap;">'+
     '<input type="text" id="mg-newspace" placeholder="New space name (e.g. Kitchen)">'+
     '<input type="text" id="mg-newspace-floor" placeholder="Floor (optional, e.g. First)" style="max-width:170px;">'+
-    '<button class="btn" onclick="addSpaceToProject()">Add Space</button></div>'+
+    '<button class="btn" onclick="addSpaceToProject(this)">Add Space</button></div>'+
     '<div style="font-size:11.5px;color:var(--ink-soft);margin-top:6px;">A new space starts empty &mdash; add materials to it from the Planning tab (pick from the Materials Catalog, enter quantity).</div>'+
     '</div>';
 
@@ -1758,7 +1792,8 @@ function copyClientLink(){
     toast('Select the link above and copy manually');
   });
 }
-function saveProjectMeta(){
+function saveProjectMeta(btn){
+  if(btn && btn.disabled) return;
   var payload = {
     projectId: STATE.currentProjectId,
     name: document.getElementById('mg-name').value,
@@ -1768,17 +1803,51 @@ function saveProjectMeta(){
     budget: document.getElementById('mg-budget').value,
     clientName: document.getElementById('mg-client').value
   };
+  btnBusy(btn);
   apiPost('updateProject', payload).then(function(){
     toast('Project updated'); refresh();
+  }).catch(function(err){ btnReset(btn); showErr(err); });
+}
+function deleteProjectConfirm(projectId, projectName, btn){
+  if(btn && btn.disabled) return;
+  if(!window.confirm('Delete "'+projectName+'"? This permanently removes the project and all its spaces, BOQ lines, schedule activities, and daily logs. This cannot be undone.')) return;
+  btnBusy(btn);
+  apiPost('deleteProject', { projectId: projectId }).then(function(){
+    toast('Project deleted');
+    return apiGet('getAllData').then(function(data){
+      STATE.data = data;
+      STATE.currentProjectId = (data.projects[0] && data.projects[0].ProjectID) || null;
+      STATE.currentTab = defaultTabForRole();
+      render();
+    });
+  }).catch(function(err){ btnReset(btn); showErr(err); });
+}
+function renameSpacePrompt(spaceId, currentName){
+  var name = window.prompt('Rename space', currentName);
+  if(name===null) return;
+  name = name.trim();
+  if(!name || name===currentName) return;
+  apiPost('updateSpace', { spaceId: spaceId, name: name }).then(function(){
+    toast('Space renamed'); refresh();
   }).catch(showErr);
 }
-function addSpaceToProject(){
+function deleteSpacePrompt(spaceId, name, btn){
+  if(btn && btn.disabled) return;
+  if(!window.confirm('Delete space "'+name+'"? This removes its BOQ lines, schedule activities, and daily logs. This cannot be undone.')) return;
+  if(btn) btn.disabled = true;
+  apiPost('deleteSpace', { spaceId: spaceId }).then(function(){
+    toast('Space deleted'); refresh();
+  }).catch(function(err){ if(btn) btn.disabled = false; showErr(err); });
+}
+function addSpaceToProject(btn){
+  if(btn && btn.disabled) return;
   var name = document.getElementById('mg-newspace').value.trim();
   var floor = document.getElementById('mg-newspace-floor').value.trim();
   if(!name){ toast('Enter a space name'); return; }
+  btnBusy(btn);
   apiPost('addSpace', { projectId: STATE.currentProjectId, name: name, floor: floor }).then(function(){
     toast('Space added'); refresh();
-  }).catch(showErr);
+  }).catch(function(err){ btnReset(btn); showErr(err); });
 }
 
 // ============================= MATERIALS CATALOG (Admin, global) =============================
@@ -1870,11 +1939,12 @@ function renderMtSubcategoryOptions(){
 function openAddMaterialToCatalogModal(){
   var body = materialFormBody('Add Material', null)+
     '<div class="modal-actions"><button class="btn" onclick="closeModal()">Cancel</button>'+
-    '<button class="btn primary" onclick="saveNewMaterial()">Add</button></div>';
+    '<button class="btn primary" onclick="saveNewMaterial(this)">Add</button></div>';
   showModal(body);
   renderMtSubcategoryOptions();
 }
-function saveNewMaterial(){
+function saveNewMaterial(btn){
+  if(btn && btn.disabled) return;
   var payload = {
     category: document.getElementById('mt-cat').value,
     subcategory: document.getElementById('mt-subcat').value,
@@ -1884,9 +1954,10 @@ function saveNewMaterial(){
     agency: document.getElementById('mt-agency').value
   };
   if(!payload.category || !payload.name || !payload.unit){ toast('Category, name and unit are required'); return; }
+  btnBusy(btn);
   apiPost('addMaterial', payload).then(function(){
     closeModal(); toast('Material added'); refresh();
-  }).catch(showErr);
+  }).catch(function(err){ btnReset(btn); showErr(err); });
 }
 
 // ============================= CLIENT VIEW =============================
@@ -1956,7 +2027,7 @@ function renderNewProjectModal(){
       '<div class="space-adder"><input type="text" id="np-newspace" placeholder="Add a space, e.g. Kitchen" onkeydown="if(event.key===\'Enter\'){event.preventDefault();addNPSpace();}">'+
       '<button class="btn small" onclick="addNPSpace()">Add</button></div></div>'+
     '<div class="modal-actions"><button class="btn" onclick="closeModal()">Cancel</button>'+
-    '<button class="btn primary" onclick="createProject()">Create Project</button></div>';
+    '<button class="btn primary" onclick="createProject(this)">Create Project</button></div>';
   showModal(body);
 }
 function renderSpaceChips(){
@@ -1976,7 +2047,8 @@ function removeNPSpace(i){
   newProjectSpaces.splice(i,1);
   document.getElementById('np-space-chips').innerHTML = renderSpaceChips();
 }
-function createProject(){
+function createProject(btn){
+  if(btn && btn.disabled) return;
   var name = document.getElementById('np-name').value.trim();
   if(!name){ toast('Project name is required'); return; }
   var payload = {
@@ -1988,12 +2060,13 @@ function createProject(){
     clientName: document.getElementById('np-client').value,
     spaces: newProjectSpaces.length ? newProjectSpaces : ['Drawing Room']
   };
+  btnBusy(btn);
   apiPost('addProject', payload).then(function(res){
     closeModal(); toast('Project created');
     return apiGet('getAllData').then(function(data){
       STATE.data = data; STATE.currentProjectId = res.projectId; STATE.currentTab = defaultTabForRole(); render();
     });
-  }).catch(showErr);
+  }).catch(function(err){ btnReset(btn); showErr(err); });
 }
 
 // ============================= MODAL PLUMBING =============================
