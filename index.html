@@ -381,6 +381,20 @@ function escapeHtml(s){
     return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
   });
 }
+// Escapes a value for embedding as a single-quoted JS string literal inside
+// a double-quoted HTML onclick="..." attribute, e.g. onclick="fn('+jsAttr(x)+')".
+// escapeHtml(x).replace(/'/g,"\\'") looks like it does this but doesn't:
+// escapeHtml already turns ' into the &#39; entity, so the following
+// replace never finds a literal ' to escape — and the browser decodes
+// &#39; back to a raw ' while parsing the attribute, landing an
+// unescaped quote right in the middle of the JS string it's inside. Any
+// name containing an apostrophe (e.g. a material like "2'X2' tile") then
+// silently breaks that onclick handler. This escapes the backslash and
+// quote for the JS string first, then only the attribute-delimiter-unsafe
+// characters (& and ") for HTML — never re-touches the JS-escaped quote.
+function jsAttr(s){
+  return String(s==null?'':s).replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/&/g,'&amp;').replace(/"/g,'&quot;');
+}
 
 // ============================= BACKEND API =============================
 var APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzEPFiPoZMiq-BefAbPBvjG-o0VZkMH4UxNVQchUfQJyw3Xag6eAxKA2MVBRVcLsKiA3w/exec';
@@ -794,7 +808,7 @@ function renderTrackerView(editable){
     rows.forEach(function(r){
       html += '<tr><td class="subitem-cell"><span class="cat">'+escapeHtml(r.Category)+'</span>'+escapeHtml(r.MaterialName)+
         '<span class="agency-chip">'+escapeHtml(r.Agency)+'</span>'+
-        (STATE.role==='admin' ? '<button class="cat-remove-btn" title="Remove this line from the BOQ" onclick="deleteBoqItemPrompt(\''+r.BoqItemID+'\',\''+escapeHtml(r.MaterialName).replace(/'/g,"\\'")+'\')">&times;</button>' : '')+
+        (STATE.role==='admin' ? '<button class="cat-remove-btn" title="Remove this line from the BOQ" onclick="deleteBoqItemPrompt(\''+r.BoqItemID+'\',\''+jsAttr(r.MaterialName)+'\')">&times;</button>' : '')+
         '</td>'+
         '<td>'+escapeHtml(r.Unit)+'</td><td>'+r.Quantity+'</td>';
       (sp.Design||[]).forEach(function(d){
@@ -1134,7 +1148,7 @@ function renderScheduleChart(pid, opts){
     });
     catOrder.forEach(function(cat){
       body += '<div class="sched-cat-title">'+escapeHtml(cat)+
-        (opts.readOnly ? '' : '<button class="cat-remove-btn" title="Remove this category\'s tasks" onclick="deleteTaskCategoryPrompt(\''+sp.SpaceID+'\',\''+escapeHtml(cat).replace(/'/g,"\\'")+'\')">&times;</button>')+
+        (opts.readOnly ? '' : '<button class="cat-remove-btn" title="Remove this category\'s tasks" onclick="deleteTaskCategoryPrompt(\''+sp.SpaceID+'\',\''+jsAttr(cat)+'\')">&times;</button>')+
         '</div>';
       byCat[cat].forEach(function(a){
         var left = dayDiff(rangeStart, a.StartDate)*SCHED_PX_PER_DAY;
@@ -1874,15 +1888,15 @@ function renderManageView(){
   html += '<div class="card" style="max-width:560px;margin-bottom:18px;border-color:var(--vs-red,#c0392b);">'+
     '<h3>Delete Project</h3>'+
     '<div style="font-size:12.5px;color:var(--ink-soft);margin-bottom:10px;">Permanently removes this project and all its spaces, BOQ lines, schedule activities, and daily logs. This cannot be undone.</div>'+
-    '<button class="btn" style="border-color:#c0392b;color:#c0392b;" onclick="deleteProjectConfirm(\''+pid+'\',\''+escapeHtml(p.Name).replace(/'/g,"\\'")+'\',this)">Delete Project</button>'+
+    '<button class="btn" style="border-color:#c0392b;color:#c0392b;" onclick="deleteProjectConfirm(\''+pid+'\',\''+jsAttr(p.Name)+'\',this)">Delete Project</button>'+
     '</div>';
 
   html += '<div class="card" style="max-width:560px;"><h3>Spaces</h3>'+
     '<div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:6px;">Click a space to rename it, or &times; to delete it.</div>';
   var hasFloors = spaces.some(function(s){ return s.Floor; });
   function spaceChipHtml(s){
-    return '<div class="chip-remove" style="cursor:pointer;" onclick="renameSpacePrompt(\''+s.SpaceID+'\',\''+escapeHtml(s.Name).replace(/'/g,"\\'")+'\')" title="Click to rename">'+escapeHtml(s.Name)+
-      ' <button onclick="event.stopPropagation();deleteSpacePrompt(\''+s.SpaceID+'\',\''+escapeHtml(s.Name).replace(/'/g,"\\'")+'\',this)" title="Delete space">&times;</button></div>';
+    return '<div class="chip-remove" style="cursor:pointer;" onclick="renameSpacePrompt(\''+s.SpaceID+'\',\''+jsAttr(s.Name)+'\')" title="Click to rename">'+escapeHtml(s.Name)+
+      ' <button onclick="event.stopPropagation();deleteSpacePrompt(\''+s.SpaceID+'\',\''+jsAttr(s.Name)+'\',this)" title="Delete space">&times;</button></div>';
   }
   if(hasFloors){
     var byFloor = {};
@@ -2004,7 +2018,7 @@ function renderMaterialsCatalogView(){
         '<td><select class="inline-edit" onchange="saveMaterialField(\''+m.MaterialID+'\',\'agency\',this.value)">'+
           agencies.map(function(a){return '<option '+(m.Agency===a?'selected':'')+'>'+escapeHtml(a)+'</option>';}).join('')+
         '</select></td>'+
-        '<td><button class="cat-remove-btn" style="font-size:16px;" title="Delete this material" onclick="deleteMaterialPrompt(\''+m.MaterialID+'\',\''+escapeHtml(m.Name).replace(/'/g,"\\'")+'\')">&times;</button></td>'+
+        '<td><button class="cat-remove-btn" style="font-size:16px;" title="Delete this material" onclick="deleteMaterialPrompt(\''+m.MaterialID+'\',\''+jsAttr(m.Name)+'\')">&times;</button></td>'+
         '</tr>';
     });
     html += '</tbody></table></div>';
