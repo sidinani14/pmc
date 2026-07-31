@@ -670,23 +670,6 @@ function rollupVisual(stages, rollupText){
   if(rollupText==='In Progress') return anyDelayed ? 'vs-yellow' : 'vs-blue';
   return anyDelayed ? 'vs-red' : 'vs-grey';
 }
-function renderDesignRow(sp){
-  var design = sp.Design || [];
-  var rollup = sp.DesignRollup || 'Not Started';
-  var cells = design.map(function(d){
-    var vis = deriveVisual(d.status, d.originalTarget, d.target);
-    var title = d.stage+': '+d.status+(vis.delayed?' (delayed)':'')+(d.target? ' · target '+fmtDate(d.target):'')+(d.delayReason?' · '+d.delayReason:'')+(d.note? ' · '+d.note:'');
-    return '<div style="text-align:center;">'+
-      '<div class="stage-cell '+vis.cls+'" style="width:52px;" title="'+escapeHtml(title)+'" onclick="openDesignStageModal(\''+sp.SpaceID+'\',\''+d.stage+'\')"></div>'+
-      '<div style="font-size:10px;color:var(--ink-soft);margin-top:3px;font-weight:600;">'+escapeHtml(d.stage)+'</div>'+
-    '</div>';
-  }).join('');
-  return '<div class="design-row" style="display:flex;align-items:center;gap:14px;margin-bottom:10px;padding:8px 10px;background:#fff;border:1px solid var(--line);border-radius:var(--radius);">'+
-    '<div style="font-size:11px;text-transform:uppercase;letter-spacing:.03em;color:var(--ink-soft);font-weight:700;">Design</div>'+
-    '<div style="display:flex;gap:10px;">'+cells+'</div>'+
-    '<span class="status-chip '+rollupVisual(design, rollup)+'" style="margin-left:auto;">'+rollup+'</span>'+
-    '</div>';
-}
 function openDesignStageModal(spaceId, stageName){
   var sp = STATE.data.spaces.filter(function(s){return s.SpaceID===spaceId;})[0];
   var stage = (sp.Design||[]).filter(function(d){return d.stage===stageName;})[0];
@@ -731,7 +714,7 @@ function renderTrackerView(editable){
   var schema = STATE.data.schema;
   var html = filterBar();
   if(!STATE.filters.space){
-    return html + '<div class="empty-state">Select a space above to view its BOQ.</div>';
+    return html + '<div class="empty-state">Select a space above to view its Tasks.</div>';
   }
   spaces.forEach(function(sp){
     if(STATE.filters.space!==sp.SpaceID) return;
@@ -741,9 +724,8 @@ function renderTrackerView(editable){
     });
     html += '<div class="space-block"><div class="space-head"><h3>'+escapeHtml(sp.Name)+'</h3>'+
       '<span class="badge ok">'+spacePct(pid, sp.SpaceID)+'% complete</span></div>';
-    html += renderDesignRow(sp);
     html += '<div class="table-wrap"><table class="tracker"><thead><tr><th>Material</th><th>Unit</th><th>Qty</th>';
-    (sp.Design||[]).forEach(function(d){ html += '<th style="text-align:center">'+escapeHtml(d.stage)+'</th>'; });
+    (sp.Design||[]).forEach(function(d){ html += '<th style="text-align:center">Design '+escapeHtml(d.stage)+'</th>'; });
     schema.materialStages.forEach(function(st){ html += '<th style="text-align:center">'+st+'</th>'; });
     html += '</tr></thead><tbody>';
     rows.forEach(function(r){
