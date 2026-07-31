@@ -793,7 +793,9 @@ function renderTrackerView(editable){
     html += '</tr></thead><tbody>';
     rows.forEach(function(r){
       html += '<tr><td class="subitem-cell"><span class="cat">'+escapeHtml(r.Category)+'</span>'+escapeHtml(r.MaterialName)+
-        '<span class="agency-chip">'+escapeHtml(r.Agency)+'</span></td>'+
+        '<span class="agency-chip">'+escapeHtml(r.Agency)+'</span>'+
+        (STATE.role==='admin' ? '<button class="cat-remove-btn" title="Remove this line from the BOQ" onclick="deleteBoqItemPrompt(\''+r.BoqItemID+'\',\''+escapeHtml(r.MaterialName).replace(/'/g,"\\'")+'\')">&times;</button>' : '')+
+        '</td>'+
         '<td>'+escapeHtml(r.Unit)+'</td><td>'+r.Quantity+'</td>';
       (sp.Design||[]).forEach(function(d){
         var vis = deriveVisual(d.status, d.originalTarget, d.target);
@@ -1990,7 +1992,7 @@ function renderMaterialsCatalogView(){
     var rows = byCat[cat];
     if(!rows || !rows.length) return;
     html += '<div class="table-wrap" style="margin-bottom:14px;"><table class="tracker"><thead><tr>'+
-      '<th>'+escapeHtml(cat)+'</th><th>Subcategory</th><th>Unit</th><th>Rate</th><th>Agency</th></tr></thead><tbody>';
+      '<th>'+escapeHtml(cat)+'</th><th>Subcategory</th><th>Unit</th><th>Rate</th><th>Agency</th><th></th></tr></thead><tbody>';
     rows.forEach(function(m){
       html += '<tr>'+
         '<td><input class="inline-edit" value="'+escapeHtml(m.Name)+'" onchange="saveMaterialField(\''+m.MaterialID+'\',\'name\',this.value)"></td>'+
@@ -2002,6 +2004,7 @@ function renderMaterialsCatalogView(){
         '<td><select class="inline-edit" onchange="saveMaterialField(\''+m.MaterialID+'\',\'agency\',this.value)">'+
           agencies.map(function(a){return '<option '+(m.Agency===a?'selected':'')+'>'+escapeHtml(a)+'</option>';}).join('')+
         '</select></td>'+
+        '<td><button class="cat-remove-btn" style="font-size:16px;" title="Delete this material" onclick="deleteMaterialPrompt(\''+m.MaterialID+'\',\''+escapeHtml(m.Name).replace(/'/g,"\\'")+'\')">&times;</button></td>'+
         '</tr>';
     });
     html += '</tbody></table></div>';
@@ -2014,6 +2017,20 @@ function renderMaterialsCatalogView(){
     }).join('')+
     '</tbody></table></div>';
   return html;
+}
+function deleteBoqItemPrompt(boqItemId, name){
+  if(!window.confirm('Remove "'+name+'" from this space\'s BOQ? This cannot be undone.')) return;
+  apiPost('deleteBoqItem', { boqItemId: boqItemId }).then(function(){
+    STATE.data.boqItems = STATE.data.boqItems.filter(function(b){ return b.BoqItemID!==boqItemId; });
+    toast('Removed from BOQ'); render();
+  }).catch(showErr);
+}
+function deleteMaterialPrompt(materialId, name){
+  if(!window.confirm('Delete "'+name+'" from the Materials Catalog? Any BOQ lines already added from it keep their own values, but it will no longer be selectable in Add Material.')) return;
+  apiPost('deleteMaterial', { materialId: materialId }).then(function(){
+    STATE.data.materialsConfig = STATE.data.materialsConfig.filter(function(m){ return m.MaterialID!==materialId; });
+    toast('Material deleted'); render();
+  }).catch(showErr);
 }
 function saveMaterialField(materialId, field, value){
   var m = STATE.data.materialsConfig.filter(function(x){return x.MaterialID===materialId;})[0];

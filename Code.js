@@ -771,8 +771,8 @@ function doPost(e) {
     addProject: addProject, updateProject: updateProject, deleteProject: deleteProject, addSpace: addSpace,
     updateSpace: updateSpace, deleteSpace: deleteSpace,
     addTaskCategoriesToSpace: addTaskCategoriesToSpace, deleteTaskCategory: deleteTaskCategory,
-    addMaterial: addMaterial, updateMaterial: updateMaterial,
-    addBoqItem: addBoqItem, updateBoqItem: updateBoqItem,
+    addMaterial: addMaterial, updateMaterial: updateMaterial, deleteMaterial: deleteMaterial,
+    addBoqItem: addBoqItem, updateBoqItem: updateBoqItem, deleteBoqItem: deleteBoqItem,
     addBoqImage: addBoqImage, removeBoqImage: removeBoqImage,
     updateStage: updateStage, updateDesignStage: updateDesignStage, addDailyLog: addDailyLog,
     updateActivity: updateActivity, setActivityDependencies: setActivityDependencies,
@@ -1006,6 +1006,20 @@ function updateMaterial(payload) {
     }
   });
   sheet.getRange(row, 1, 1, headers.length).setValues([current]);
+  return { ok: true };
+}
+
+// Removes a material from the shared catalog entirely. Safe even if it's
+// already used on existing BOQ lines — a BOQ_ITEMS row snapshots the
+// material's Name/Category/Subcategory/Agency/Rate at add-time rather than
+// looking them up by MaterialID, so deleting the catalog entry doesn't
+// touch any project's existing BOQ.
+function deleteMaterial(payload) {
+  var ss = getSS_();
+  var sheet = getTab_(ss, 'MATERIALS_CONFIG');
+  var row = findRowById_(sheet, 'MaterialID', payload.materialId);
+  if (row < 0) throw new Error('Material not found');
+  sheet.deleteRow(row);
   return { ok: true };
 }
 
@@ -1304,6 +1318,18 @@ function updateBoqItem(payload) {
   if (payload.notes !== undefined) current[idx.Notes] = payload.notes;
   current[idx.UpdatedAt] = new Date();
   sheet.getRange(row, 1, 1, headers.length).setValues([current]);
+  return { ok: true };
+}
+
+// Removes one BOQ line from a space — e.g. a material added by mistake.
+// Only that row is touched; the Materials Catalog entry it was added from
+// is untouched.
+function deleteBoqItem(payload) {
+  var ss = getSS_();
+  var sheet = getTab_(ss, 'BOQ_ITEMS');
+  var row = findRowById_(sheet, 'BoqItemID', payload.boqItemId);
+  if (row < 0) throw new Error('BOQ item not found');
+  sheet.deleteRow(row);
   return { ok: true };
 }
 
