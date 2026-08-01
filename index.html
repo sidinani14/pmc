@@ -468,6 +468,22 @@ function toast(msg){
 // feedback (disabled + "Saving…" the moment it's clicked, "Saved" once the
 // request resolves) so a slow network doesn't read as "nothing happened"
 // and invite a re-click that creates a duplicate record.
+// Merges backend-returned rows into STATE.data in place, by ID — the
+// targeted alternative to refresh()'s full getAllData() refetch after a
+// write whose response already tells us exactly what changed (an edited
+// activity, everything a cascade shifted, etc).
+function mergeActivities(updated){
+  if(!updated || !updated.length) return;
+  var byId = {};
+  updated.forEach(function(a){ byId[a.ActivityID] = a; });
+  STATE.data.activities = STATE.data.activities.map(function(a){ return byId[a.ActivityID] || a; });
+}
+function mergeBoqItems(updated){
+  if(!updated || !updated.length) return;
+  var byId = {};
+  updated.forEach(function(b){ byId[b.BoqItemID] = b; });
+  STATE.data.boqItems = STATE.data.boqItems.map(function(b){ return byId[b.BoqItemID] || b; });
+}
 function btnBusy(btn){
   if(!btn) return;
   btn.disabled = true;
@@ -805,8 +821,11 @@ function saveDesignStage(spaceId, stageName){
     note: document.getElementById('ds-note').value,
     delayReason: reasonEl ? reasonEl.value : ''
   };
-  apiPost('updateDesignStage', payload).then(function(){
-    closeModal(); toast('Saved'); refresh();
+  apiPost('updateDesignStage', payload).then(function(res){
+    var sp = STATE.data.spaces.filter(function(s){return s.SpaceID===spaceId;})[0];
+    if(sp && res){ sp.Design = res.stages; sp.DesignRollup = res.rollup; }
+    if(res && res.activities) mergeActivities(res.activities);
+    closeModal(); toast('Saved'); render();
   }).catch(showErr);
 }
 
@@ -927,8 +946,10 @@ function saveStage(boqItemId, stageName){
     note: document.getElementById('m-note').value,
     delayReason: reasonEl ? reasonEl.value : ''
   };
-  apiPost('updateStage', payload).then(function(){
-    closeModal(); toast('Saved'); refresh();
+  apiPost('updateStage', payload).then(function(res){
+    var b = STATE.data.boqItems.filter(function(x){return x.BoqItemID===boqItemId;})[0];
+    if(b && res){ b.Stages = res.stages; b.RollupStatus = res.rollup; }
+    closeModal(); toast('Saved'); render();
   }).catch(showErr);
 }
 
@@ -1362,8 +1383,9 @@ function startBarDrag(e, barEl, mode){
       var newWidthDays = Math.max(Math.round((origWidth+dx)/SCHED_PX_PER_DAY), 1);
       payload.endDate = addDaysISO(act.StartDate, newWidthDays);
     }
-    apiPost('updateActivity', payload).then(function(){
-      toast('Schedule updated'); refresh();
+    apiPost('updateActivity', payload).then(function(res){
+      if(res && res.activities) mergeActivities(res.activities);
+      toast('Schedule updated'); render();
     }).catch(function(err){ showErr(err); refresh(); });
   }
   document.addEventListener('mousemove', onMove);
@@ -1465,14 +1487,16 @@ function saveActivity(activityId){
   var btn = document.getElementById('act-save-btn');
   if(btn){ btn.disabled = true; btn.textContent = 'Saving…'; }
 
-  var chain = apiPost('updateActivity', payload);
-  if(depsChanged){
-    chain = chain.then(function(){
-      return apiPost('setActivityDependencies', { activityId: activityId, predecessors: deps });
-    });
-  }
+  var chain = apiPost('updateActivity', payload).then(function(res){
+    if(res && res.activities) mergeActivities(res.activities);
+    if(depsChanged){
+      return apiPost('setActivityDependencies', { activityId: activityId, predecessors: deps }).then(function(res2){
+        if(res2 && res2.activities) mergeActivities(res2.activities);
+      });
+    }
+  });
   chain.then(function(){
-    closeModal(); toast('Activity updated'); refresh();
+    closeModal(); toast('Activity updated'); render();
   }).catch(function(err){
     if(btn){ btn.disabled = false; btn.textContent = 'Save'; }
     showErr(err);
@@ -1830,8 +1854,16 @@ function submitDailyLog(btn){
       date: date, projectId: STATE.currentProjectId, spaceId: spaceId, loggedBy: by,
       hasBlocker: hasBlocker, notes: notesEl?notesEl.value.trim():'', designStageDone: designStageDone,
       updates: updates, orderPlacements: orderPlacements
-    }).then(function(){
-      toast('Logged'); refresh();
+    }).then(function(res){
+      if(res){
+        mergeActivities(res.activities);
+        mergeBoqItems(res.boqItems);
+        if(res.design){
+          var sp = STATE.data.spaces.filter(function(s){return s.SpaceID===res.design.spaceId;})[0];
+          if(sp){ sp.Design = res.design.stages; sp.DesignRollup = res.design.rollup; }
+        }
+      }
+      toast('Logged'); render();
     }).catch(function(err){ btnReset(btn); showErr(err); });
     return;
   }
@@ -1841,8 +1873,11 @@ function submitDailyLog(btn){
   if(!entry){ toast('Please add what got done today'); return; }
   var payload = { date: date, projectId: STATE.currentProjectId, spaceId: spaceId, entry: entry, loggedBy: by, hasBlocker: hasBlocker };
   btnBusy(btn);
-  apiPost('addDailyLog', payload).then(function(){
-    toast('Logged'); refresh();
+  apiPost('addDailyLog', payload).then(function(res){
+    if(res && res.log){
+      STATE.data.dailyLog.unshift(res.log);
+    }
+    toast('Logged'); render();
   }).catch(function(err){ btnReset(btn); showErr(err); });
 }
 
@@ -2027,7 +2062,18 @@ function saveProjectMeta(btn){
   };
   btnBusy(btn);
   apiPost('updateProject', payload).then(function(){
-    toast('Project updated'); refresh();
+    // Mirrors updateProject's own semantics: a blank field leaves the
+    // existing value alone rather than clearing it.
+    var p = STATE.data.projects.filter(function(x){return x.ProjectID===payload.projectId;})[0];
+    if(p){
+      if(payload.name) p.Name = payload.name;
+      if(payload.address) p.Address = payload.address;
+      if(payload.startDate) p.StartDate = payload.startDate;
+      if(payload.targetMoveIn) p.TargetMoveIn = payload.targetMoveIn;
+      if(payload.budget) p.Budget = Number(payload.budget);
+      if(payload.clientName) p.ClientName = payload.clientName;
+    }
+    toast('Project updated'); btnReset(btn); render();
   }).catch(function(err){ btnReset(btn); showErr(err); });
 }
 function deleteProjectConfirm(projectId, projectName, btn){
@@ -2051,7 +2097,9 @@ function renameSpacePrompt(spaceId, currentName){
   name = titleCase(name.trim());
   if(!name || name===currentName) return;
   apiPost('updateSpace', { spaceId: spaceId, name: name }).then(function(){
-    toast('Space renamed'); refresh();
+    var sp = STATE.data.spaces.filter(function(s){return s.SpaceID===spaceId;})[0];
+    if(sp) sp.Name = name;
+    toast('Space renamed'); render();
   }).catch(showErr);
 }
 function deleteSpacePrompt(spaceId, name, btn){
@@ -2059,7 +2107,12 @@ function deleteSpacePrompt(spaceId, name, btn){
   if(!window.confirm('Delete space "'+name+'"? This removes its BOQ lines, schedule activities, and daily logs. This cannot be undone.')) return;
   if(btn) btn.disabled = true;
   apiPost('deleteSpace', { spaceId: spaceId }).then(function(){
-    toast('Space deleted'); refresh();
+    STATE.data.spaces = STATE.data.spaces.filter(function(s){ return s.SpaceID!==spaceId; });
+    STATE.data.boqItems = STATE.data.boqItems.filter(function(b){ return b.SpaceID!==spaceId; });
+    STATE.data.activities = STATE.data.activities.filter(function(a){ return a.SpaceID!==spaceId; });
+    STATE.data.dailyLog = STATE.data.dailyLog.filter(function(l){ return l.SpaceID!==spaceId; });
+    if(STATE.filters.space===spaceId) STATE.filters.space = '';
+    toast('Space deleted'); render();
   }).catch(function(err){ if(btn) btn.disabled = false; showErr(err); });
 }
 function addSpaceToProject(btn){
@@ -2068,8 +2121,9 @@ function addSpaceToProject(btn){
   var floor = titleCase(document.getElementById('mg-newspace-floor').value.trim());
   if(!name){ toast('Enter a space name'); return; }
   btnBusy(btn);
-  apiPost('addSpace', { projectId: STATE.currentProjectId, name: name, floor: floor }).then(function(){
-    toast('Space added'); refresh();
+  apiPost('addSpace', { projectId: STATE.currentProjectId, name: name, floor: floor }).then(function(res){
+    if(res && res.space) STATE.data.spaces.push(res.space);
+    toast('Space added'); render();
   }).catch(function(err){ btnReset(btn); showErr(err); });
 }
 
@@ -2152,7 +2206,9 @@ function saveMaterialCategory(materialId, newCategory){
   var taxonomy = STATE.data.schema.taxonomy;
   var firstLeaf = taxonomyLeaves(taxonomy, newCategory)[0] || {subcategory:'', subsubcategory:''};
   apiPost('updateMaterial', { materialId: materialId, category: newCategory, subcategory: firstLeaf.subcategory, subsubcategory: firstLeaf.subsubcategory }).then(function(){
-    toast('Category updated'); refresh();
+    var m = STATE.data.materialsConfig.filter(function(x){return x.MaterialID===materialId;})[0];
+    if(m){ m.Category = newCategory; m.Subcategory = firstLeaf.subcategory; m.SubSubcategory = firstLeaf.subsubcategory; }
+    toast('Category updated'); render();
   }).catch(showErr);
 }
 function materialFormBody(title, m){

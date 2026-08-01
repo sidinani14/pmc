@@ -985,7 +985,16 @@ function addSpace(payload) {
   // No execution checklist is seeded here — the team picks which TAXONOMY
   // leaves actually apply to this space via addTasksToSpace,
   // instead of every space getting all ~51 tasks whether relevant or not.
-  return { spaceId: spaceId };
+  var design = DESIGN_STAGES.map(function (s) {
+    return { stage: s, status: 'Not Started', target: '', actual: '', note: '' };
+  });
+  return {
+    spaceId: spaceId,
+    space: {
+      SpaceID: spaceId, ProjectID: payload.projectId, Name: payload.name, Floor: payload.floor || '',
+      SortOrder: sortOrder, Design: design, DesignRollup: 'Not Started'
+    }
+  };
 }
 
 function updateSpace(payload) {
@@ -1256,14 +1265,14 @@ function applyActivityChange_(ss, activityId, changes) {
   if (changes.status === 'Done') current[idx.PercentComplete] = 100;
   sheet.getRange(row, 1, 1, headers.length).setValues([current]);
 
-  cascadeFromActivity_(ss, activityId);
+  return [activityId].concat(cascadeFromActivity_(ss, activityId));
 }
 
 function updateActivity(payload) {
   // payload: { activityId, startDate?, endDate?, status?, notes? }
   var ss = getSS_();
-  applyActivityChange_(ss, payload.activityId, payload);
-  return { ok: true };
+  var changedIds = applyActivityChange_(ss, payload.activityId, payload);
+  return { ok: true, activities: getActivitiesByIds_(ss, changedIds) };
 }
 
 function submitActivityUpdates(payload) {
@@ -1275,23 +1284,28 @@ function submitActivityUpdates(payload) {
   // supplies materials, so there's no 1:1 activity<->agency link anymore.
   var ss = getSS_();
   var summaryParts = [];
+  var changedActivityIds = [];
+  var changedBoqItemIds = [];
   (payload.updates || []).forEach(function (u) {
-    applyActivityChange_(ss, u.activityId, { status: u.status, endDate: u.endDate, percentComplete: u.percentComplete });
+    var ids = applyActivityChange_(ss, u.activityId, { status: u.status, endDate: u.endDate, percentComplete: u.percentComplete });
+    changedActivityIds = changedActivityIds.concat(ids);
     var actRow = rowsToObjects_(getTab_(ss, 'SCHEDULE_ACTIVITIES')).filter(function (a) { return a.ActivityID === u.activityId; })[0];
     summaryParts.push((actRow ? actRow.Agency : u.activityId) + ': ' + u.status + ' (' + u.percentComplete + '%)');
   });
   (payload.orderPlacements || []).forEach(function (o) {
     if (!o.done) return;
-    bulkMarkOrderPlacementDone_(payload.projectId, payload.spaceId, o.agency, payload.date);
+    changedBoqItemIds = changedBoqItemIds.concat(bulkMarkOrderPlacementDone_(payload.projectId, payload.spaceId, o.agency, payload.date));
     summaryParts.push(o.agency + ': Order Placement done');
   });
+  var designResult = null;
   if (payload.designStageDone) {
     var pendingStage = getSpaceDesignStage_(ss, payload.spaceId, payload.designStageDone);
     if (pendingStage && pendingStage.status !== 'Done') {
-      updateDesignStage({
+      designResult = updateDesignStage({
         spaceId: payload.spaceId, stage: payload.designStageDone, status: 'Done',
         target: pendingStage.target || payload.date, actual: payload.date
       });
+      changedActivityIds = changedActivityIds.concat((designResult.activities || []).map(function (a) { return a.ActivityID; }));
       summaryParts.push('Design ' + payload.designStageDone + ' finalized');
     }
   }
@@ -1310,7 +1324,12 @@ function submitActivityUpdates(payload) {
   var body = payload.loggedBy + ' logged an update on ' + payload.date + ':\n\n' + entry + '\n\n' + APP_URL;
   notify_(subject, body);
 
-  return { logId: logId };
+  return {
+    logId: logId,
+    activities: getActivitiesByIds_(ss, changedActivityIds),
+    boqItems: getBoqItemsByIds_(ss, changedBoqItemIds),
+    design: designResult ? { spaceId: payload.spaceId, rollup: designResult.rollup, stages: designResult.stages } : null
+  };
 }
 
 function setActivityDependencies(payload) {
@@ -1331,9 +1350,9 @@ function setActivityDependencies(payload) {
   sheet.getRange(row, predColIdx + 1).setValue(JSON.stringify(predecessors));
   sheet.getRange(row, updatedColIdx + 1).setValue(new Date());
 
-  cascadeFromActivity_(ss, payload.activityId);
-  predecessors.forEach(function (p) { cascadeFromActivity_(ss, p.id); });
-  return { ok: true };
+  var changedIds = [payload.activityId].concat(cascadeFromActivity_(ss, payload.activityId));
+  predecessors.forEach(function (p) { changedIds = changedIds.concat(cascadeFromActivity_(ss, p.id)); });
+  return { ok: true, activities: getActivitiesByIds_(ss, changedIds) };
 }
 
 
@@ -1367,9 +1386,10 @@ function parsePredecessors_(json) {
 // predecessors, the latest date any of their links require wins (matching
 // how every other CPM scheduler resolves multiple predecessors). `visited`
 // guards against a dependency cycle.
-function cascadeFromActivity_(ss, activityId, visited) {
+function cascadeFromActivity_(ss, activityId, visited, changed) {
   visited = visited || {};
-  if (visited[activityId]) return;
+  changed = changed || [];
+  if (visited[activityId]) return changed;
   visited[activityId] = true;
 
   var sheet = getTab_(ss, 'SCHEDULE_ACTIVITIES');
@@ -1422,8 +1442,28 @@ function cascadeFromActivity_(ss, activityId, visited) {
     current[idx.EndDate] = newEnd;
     current[idx.UpdatedAt] = new Date();
     sheet.getRange(successor._row, 1, 1, headers.length).setValues([current]);
+    changed.push(successor.ActivityID);
 
-    cascadeFromActivity_(ss, successor.ActivityID, visited);
+    cascadeFromActivity_(ss, successor.ActivityID, visited, changed);
+  });
+  return changed;
+}
+
+// Fetches a specific set of activities in the normalized shape getAllData
+// uses (dates through normDate_, Predecessors parsed) — the cheap targeted
+// alternative to a full getAllData() refetch after a write that we already
+// know only touched these particular rows (itself + whatever cascaded).
+function getActivitiesByIds_(ss, ids) {
+  if (!ids || !ids.length) return [];
+  var idSet = {};
+  ids.forEach(function (id) { idSet[id] = true; });
+  return rowsToObjects_(getTab_(ss, 'SCHEDULE_ACTIVITIES')).filter(function (a) { return idSet[a.ActivityID]; }).map(function (r) {
+    r.StartDate = normDate_(r.StartDate);
+    r.EndDate = normDate_(r.EndDate);
+    r.OriginalStartDate = normDate_(r.OriginalStartDate) || r.StartDate;
+    r.OriginalEndDate = normDate_(r.OriginalEndDate) || r.EndDate;
+    r.Predecessors = parsePredecessors_(r.PredecessorsJSON);
+    return r;
   });
 }
 
@@ -1588,11 +1628,36 @@ function bulkMarkOrderPlacementDone_(projectId, spaceId, agency, date) {
   var rows = rowsToObjects_(getTab_(getSS_(), 'BOQ_ITEMS')).filter(function (r) {
     return r.ProjectID === projectId && r.SpaceID === spaceId && r.Agency === agency;
   });
+  var changed = [];
   rows.forEach(function (r) {
     var stages = JSON.parse(r.StagesJSON || '[]');
     var stageObj = stages.filter(function (s) { return s.stage === 'Order Placement'; })[0];
     if (!stageObj || stageObj.status === 'Done') return;
     updateStage({ boqItemId: r.BoqItemID, stage: 'Order Placement', status: 'Done', target: stageObj.target || date, actual: date });
+    changed.push(r.BoqItemID);
+  });
+  return changed;
+}
+
+// Fetches a specific set of BOQ items in the normalized shape getAllData
+// uses (Stages/Quantity/EffectiveRate/Amount/Images computed) — the cheap
+// targeted alternative to a full getAllData() refetch.
+function getBoqItemsByIds_(ss, ids) {
+  if (!ids || !ids.length) return [];
+  var idSet = {};
+  ids.forEach(function (id) { idSet[id] = true; });
+  return rowsToObjects_(getTab_(ss, 'BOQ_ITEMS')).filter(function (r) { return idSet[r.BoqItemID]; }).map(function (r) {
+    r.Stages = JSON.parse(r.StagesJSON || '[]').map(function (s) {
+      s.target = normDate_(s.target);
+      s.actual = normDate_(s.actual);
+      s.originalTarget = normDate_(s.originalTarget) || s.target;
+      return s;
+    });
+    r.Quantity = (Number(r.Length) || 0) * (Number(r.Width) || 0) * (Number(r.DepthNos) || 0) + (Number(r.Contingency) || 0);
+    r.EffectiveRate = r.RevisedRate !== '' && r.RevisedRate !== undefined && r.RevisedRate !== null ? Number(r.RevisedRate) : Number(r.Rate) || 0;
+    r.Amount = r.Quantity * r.EffectiveRate;
+    r.Images = JSON.parse(r.ImagesJSON || '[]');
+    return r;
   });
 }
 
@@ -1614,11 +1679,12 @@ function updateDesignStage(payload) {
   sheet.getRange(row, designColIdx + 1).setValue(JSON.stringify(stages));
   sheet.getRange(row, rollupColIdx + 1).setValue(rollup);
 
+  var shiftedActivityIds = [];
   if (payload.stage === 'WD' && stageObj.status === 'Done') {
     var wdDoneDate = normDate_(stageObj.actual) || stageObj.actual || todayISO_();
-    gateExecutionOnDesign_(ss, payload.spaceId, wdDoneDate);
+    shiftedActivityIds = gateExecutionOnDesign_(ss, payload.spaceId, wdDoneDate);
   }
-  return { rollup: rollup, stages: stages };
+  return { rollup: rollup, stages: stages, activities: getActivitiesByIds_(ss, shiftedActivityIds) };
 }
 
 function todayISO_() {
@@ -1635,23 +1701,26 @@ function gateExecutionOnDesign_(ss, spaceId, wdDoneDate) {
   var idx = {};
   headers.forEach(function (h, i) { idx[h] = i; });
   var acts = rowsToObjects_(sheet).filter(function (a) { return a.SpaceID === spaceId; });
+  var changed = [];
 
   acts.forEach(function (a) {
     var start = normDate_(a.StartDate) || a.StartDate;
     if (start >= wdDoneDate) return;
     var end = normDate_(a.EndDate) || a.EndDate;
     var deltaMs = new Date(wdDoneDate) - new Date(start);
-    var newStart = shiftDateISO_(start, deltaMs);
-    var newEnd = shiftDateISO_(end, deltaMs);
+    var newStart = addMs_(start, deltaMs);
+    var newEnd = addMs_(end, deltaMs);
 
     var current = sheet.getRange(a._row, 1, 1, headers.length).getValues()[0];
     current[idx.StartDate] = newStart;
     current[idx.EndDate] = newEnd;
     current[idx.UpdatedAt] = new Date();
     sheet.getRange(a._row, 1, 1, headers.length).setValues([current]);
+    changed.push(a.ActivityID);
 
-    cascadeFromActivity_(ss, a.ActivityID);
+    changed = changed.concat(cascadeFromActivity_(ss, a.ActivityID));
   });
+  return changed;
 }
 
 // ---------- Daily log ----------
@@ -1661,9 +1730,10 @@ function addDailyLog(payload) {
   var ss = getSS_();
   var sheet = getTab_(ss, 'DAILY_LOG');
   var logId = 'LOG-' + Utilities.getUuid().slice(0, 8);
+  var now = new Date();
   sheet.appendRow([
     logId, payload.date, payload.projectId, payload.spaceId || '',
-    payload.entry, payload.loggedBy, !!payload.hasBlocker, new Date(), '[]'
+    payload.entry, payload.loggedBy, !!payload.hasBlocker, now, '[]'
   ]);
 
   var proj = projectName_(payload.projectId);
@@ -1673,7 +1743,14 @@ function addDailyLog(payload) {
     payload.entry + '\n\n' + APP_URL;
   notify_(subject, body);
 
-  return { logId: logId };
+  return {
+    logId: logId,
+    log: {
+      LogID: logId, Date: payload.date, ProjectID: payload.projectId, SpaceID: payload.spaceId || '',
+      Entry: payload.entry, LoggedBy: payload.loggedBy, HasBlocker: !!payload.hasBlocker,
+      CreatedAt: now.toISOString(), UpdatesJSON: '[]'
+    }
+  };
 }
 
 // ---------- Overdue digest (run daily via a time trigger) ----------
