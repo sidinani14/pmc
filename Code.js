@@ -397,7 +397,7 @@ var TABS = {
     name: 'BOQ_ITEMS', headers: [
       'BoqItemID', 'ProjectID', 'SpaceID', 'MaterialID', 'MaterialName', 'Category', 'Subcategory', 'Agency',
       'Unit', 'Length', 'Width', 'DepthNos', 'Contingency', 'Rate', 'RevisedRate',
-      'StagesJSON', 'RollupStatus', 'Notes', 'ImagesJSON', 'CreatedAt', 'UpdatedAt', 'SubSubcategory'
+      'StagesJSON', 'RollupStatus', 'Notes', 'ImagesJSON', 'CreatedAt', 'UpdatedAt', 'SubSubcategory', 'ActivityID'
     ]
   },
   DAILY_LOG: { name: 'DAILY_LOG', headers: ['LogID', 'Date', 'ProjectID', 'SpaceID', 'Entry', 'LoggedBy', 'HasBlocker', 'CreatedAt', 'UpdatesJSON'] },
@@ -461,6 +461,7 @@ function getTab_(ss, key) {
     ensureColumn_(sh, 'ImagesJSON', '[]');
     ensureColumn_(sh, 'Subcategory', '');
     ensureColumn_(sh, 'SubSubcategory', '');
+    ensureColumn_(sh, 'ActivityID', '');
   } else if (key === 'MATERIALS_CONFIG') {
     ensureColumn_(sh, 'Subcategory', '');
     ensureColumn_(sh, 'SubSubcategory', '');
@@ -821,7 +822,7 @@ function doPost(e) {
   var routes = {
     addProject: addProject, updateProject: updateProject, deleteProject: deleteProject, addSpace: addSpace,
     updateSpace: updateSpace, deleteSpace: deleteSpace,
-    addTasksToSpace: addTasksToSpace, deleteTaskCategory: deleteTaskCategory,
+    addTasksToSpace: addTasksToSpace, deleteTaskCategory: deleteTaskCategory, deleteActivity: deleteActivity,
     addMaterial: addMaterial, updateMaterial: updateMaterial, deleteMaterial: deleteMaterial,
     addBoqItem: addBoqItem, updateBoqItem: updateBoqItem, deleteBoqItem: deleteBoqItem,
     addBoqImage: addBoqImage, removeBoqImage: removeBoqImage,
@@ -1086,7 +1087,13 @@ function deleteMaterial(payload) {
 // ---------- BOQ line items ----------
 
 function addBoqItem(payload) {
-  // payload: { projectId, spaceId, materialId, length, width, depthNos, contingency, revisedRate }
+  // payload: { projectId, spaceId, materialId, length, width, depthNos, contingency, revisedRate, activityId? }
+  // activityId links this material selection to the specific task it's
+  // for (the normal flow: Planning tab creates the task, then you click it
+  // to attach material+quantity). When omitted (older/free-standing call
+  // sites), we fall back to auto-adding the material's own leaf task to
+  // the space's Schedule checklist, same as before this activity-centric
+  // model existed.
   var ss = getSS_();
   var matSheet = getTab_(ss, 'MATERIALS_CONFIG');
   var material = rowsToObjects_(matSheet).filter(function (m) { return m.MaterialID === payload.materialId; })[0];
@@ -1101,6 +1108,7 @@ function addBoqItem(payload) {
   var stages = STAGES.map(function (stageName) {
     return { stage: stageName, status: 'Not Started', target: '', actual: '', note: '' };
   });
+  var activityId = payload.activityId || '';
 
   var boqSheet = getTab_(ss, 'BOQ_ITEMS');
   var boqItemId = 'BOQ-' + Utilities.getUuid().slice(0, 6);
@@ -1108,20 +1116,18 @@ function addBoqItem(payload) {
   boqSheet.appendRow([
     boqItemId, payload.projectId, payload.spaceId, material.MaterialID, material.Name, material.Category, material.Subcategory, material.Agency,
     material.Unit, length, width, depthNos, contingency, rate, revisedRate,
-    JSON.stringify(stages), 'Not Started', '', '[]', now, now, material.SubSubcategory || ''
+    JSON.stringify(stages), 'Not Started', '', '[]', now, now, material.SubSubcategory || '', activityId
   ]);
   var quantity = length * width * depthNos + contingency;
   var effectiveRate = revisedRate !== '' ? Number(revisedRate) : rate;
 
-  // Auto-add the material's own leaf task (Category/Subcategory/
-  // SubSubcategory) to this space's Schedule checklist if it isn't already
-  // there — planning a material implies its execution task applies to this
-  // space, without waiting for someone to also remember to add it manually
-  // in the Schedule tab. No-ops (returns no new activities) if that exact
-  // leaf was already present for this space.
-  var taskResult = addTasksToSpace_(ss, payload.spaceId, [{
-    category: material.Category, subcategory: material.Subcategory, subsubcategory: material.SubSubcategory || ''
-  }]);
+  var newActivities = [];
+  if (!activityId) {
+    var taskResult = addTasksToSpace_(ss, payload.spaceId, [{
+      category: material.Category, subcategory: material.Subcategory, subsubcategory: material.SubSubcategory || ''
+    }]);
+    newActivities = taskResult.activities;
+  }
 
   return {
     boqItemId: boqItemId,
@@ -1132,9 +1138,9 @@ function addBoqItem(payload) {
       Unit: material.Unit, Length: length, Width: width, DepthNos: depthNos, Contingency: contingency,
       Rate: rate, RevisedRate: revisedRate, Stages: stages, RollupStatus: 'Not Started', Notes: '', Images: [],
       CreatedAt: now.toISOString(), UpdatedAt: now.toISOString(),
-      Quantity: quantity, EffectiveRate: effectiveRate, Amount: quantity * effectiveRate
+      Quantity: quantity, EffectiveRate: effectiveRate, Amount: quantity * effectiveRate, ActivityID: activityId
     },
-    newActivities: taskResult.activities
+    newActivities: newActivities
   };
 }
 
@@ -1216,6 +1222,22 @@ function deleteTaskCategory(payload) {
   for (var i = values.length - 1; i >= 1; i--) {
     if (values[i][spaceIdx] === payload.spaceId && values[i][catIdx] === payload.category) sheet.deleteRow(i + 1);
   }
+  return { ok: true };
+}
+
+// Deletes a single task (activity) — the per-task counterpart to
+// deleteTaskCategory's bulk-by-category delete, for the team's "keep or
+// delete based on space requirements" pass over the auto-generated task
+// list. Cascades to any BOQ material lines already chosen for that task,
+// since they only make sense in the context of a task that still exists.
+function deleteActivity(payload) {
+  // payload: { activityId }
+  var ss = getSS_();
+  var sheet = getTab_(ss, 'SCHEDULE_ACTIVITIES');
+  var row = findRowById_(sheet, 'ActivityID', payload.activityId);
+  if (row < 0) throw new Error('Activity not found');
+  sheet.deleteRow(row);
+  deleteRowsWhere_(getTab_(ss, 'BOQ_ITEMS'), 'ActivityID', payload.activityId);
   return { ok: true };
 }
 

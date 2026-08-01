@@ -830,6 +830,12 @@ function saveDesignStage(spaceId, stageName){
 }
 
 // ============================= TRACKER / PLANNING GRID (BOQ) =============================
+// Task-centric Planning: the space's task list (from Schedule) is the
+// primary thing here now, each task optionally carrying one or more
+// material lines (BOQ_ITEMS linked via ActivityID). Generating the task
+// list itself ("+ Add Tasks") and adding materials to a specific task both
+// live here; the Schedule/Gantt tab is purely about timing (dependencies,
+// duration, dates) for tasks that already exist.
 function renderTrackerView(editable){
   var pid = STATE.currentProjectId;
   var spaces = spacesOf(pid);
@@ -840,42 +846,62 @@ function renderTrackerView(editable){
   }
   spaces.forEach(function(sp){
     if(STATE.filters.space!==sp.SpaceID) return;
-    var rows = boqItemsOf(pid, sp.SpaceID).filter(function(r){
-      if(STATE.filters.category && r.Category!==STATE.filters.category) return false;
+    var acts = activitiesOf(pid).filter(function(a){
+      if(a.SpaceID!==sp.SpaceID) return false;
+      if(STATE.filters.category && a.Category!==STATE.filters.category) return false;
       return true;
     });
     html += '<div class="space-block"><div class="space-head"><h3>'+escapeHtml(sp.Name)+'</h3>'+
       '<span class="badge ok">'+spacePct(pid, sp.SpaceID)+'% complete</span></div>';
-    html += '<div class="table-wrap"><table class="tracker"><thead><tr><th>Material</th><th>Unit</th><th>Qty</th>';
-    (sp.Design||[]).forEach(function(d){ html += '<th style="text-align:center">Design '+escapeHtml(d.stage)+'</th>'; });
-    schema.materialStages.forEach(function(st){ html += '<th style="text-align:center">'+st+'</th>'; });
-    html += '</tr></thead><tbody>';
-    rows.forEach(function(r){
-      html += '<tr><td class="subitem-cell"><span class="cat">'+escapeHtml(r.Category)+'</span>'+escapeHtml(r.MaterialName)+
-        '<span class="agency-chip">'+escapeHtml(r.Agency)+'</span>'+
-        (STATE.role==='admin' ? '<button class="cat-remove-btn" title="Remove this line from the BOQ" onclick="deleteBoqItemPrompt(\''+r.BoqItemID+'\',\''+jsAttr(r.MaterialName)+'\')">&times;</button>' : '')+
-        '</td>'+
-        '<td>'+escapeHtml(r.Unit)+'</td><td>'+r.Quantity+'</td>';
-      (sp.Design||[]).forEach(function(d){
-        var vis = deriveVisual(d.status, d.originalTarget, d.target);
-        var title = 'Design '+d.stage+': '+d.status+(vis.delayed?' (delayed)':'')+(d.target? ' · target '+fmtDate(d.target):'')+(d.delayReason?' · '+d.delayReason:'')+(d.note? ' · '+d.note:'');
-        html += '<td style="text-align:center"><div class="stage-cell '+vis.cls+'" title="'+escapeHtml(title)+'" onclick="openDesignStageModal(\''+sp.SpaceID+'\',\''+d.stage+'\')"></div></td>';
-      });
-      r.Stages.forEach(function(s){
-        var vis = deriveVisual(s.status, s.originalTarget, s.target);
-        var title = s.stage+': '+s.status+(vis.delayed?' (delayed)':'')+(s.target? ' · target '+fmtDate(s.target):'')+(s.delayReason?' · '+s.delayReason:'')+(s.note? ' · '+s.note:'');
-        html += '<td style="text-align:center"><div class="stage-cell '+vis.cls+'" title="'+escapeHtml(title)+'" '+
-          (editable? 'onclick="openStageModal(\''+r.BoqItemID+'\',\''+s.stage+'\')"' : 'onclick="openStageModal(\''+r.BoqItemID+'\',\''+s.stage+'\',true)"')+
-          '></div></td>';
-      });
-      html += '</tr>';
-    });
-    html += '</tbody></table>';
-    if(STATE.role==='admin'){
-      html += '<div class="add-material-row"><button class="btn small" onclick="openAddMaterialModal(\''+sp.SpaceID+'\')">+ Add Material</button></div>';
+    if((sp.Design||[]).length){
+      html += '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">'+
+        '<span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:var(--ink-soft);">Design</span>'+
+        sp.Design.map(function(d){
+          var vis = deriveVisual(d.status, d.originalTarget, d.target);
+          var title = 'Design '+d.stage+': '+d.status+(vis.delayed?' (delayed)':'')+(d.target? ' · target '+fmtDate(d.target):'')+(d.delayReason?' · '+d.delayReason:'')+(d.note? ' · '+d.note:'');
+          return '<div class="stage-cell '+vis.cls+'" style="width:auto;padding:3px 10px;font-size:11px;font-weight:700;" title="'+escapeHtml(title)+'" onclick="openDesignStageModal(\''+sp.SpaceID+'\',\''+d.stage+'\')">'+escapeHtml(d.stage)+'</div>';
+        }).join('')+
+      '</div>';
     }
-    html += '</div></div>';
-    if(!rows.length && STATE.role!=='admin') html += '<div class="empty-state" style="padding:20px;">No BOQ items in this space yet.</div>';
+    if(STATE.role==='admin'){
+      html += '<div style="margin-bottom:10px;"><button class="btn small" onclick="openAddTasksModal(\''+sp.SpaceID+'\')">+ Add Tasks</button></div>';
+    }
+    if(!acts.length){
+      html += '<div class="empty-state" style="padding:16px;">No tasks yet'+(STATE.filters.category?' in this category':' for this space')+'.</div>';
+    }
+    acts.forEach(function(a){
+      var mats = STATE.data.boqItems.filter(function(b){ return b.ActivityID===a.ActivityID; });
+      var visA = deriveVisual(a.Status, a.OriginalEndDate, a.EndDate);
+      html += '<div class="card" style="margin-bottom:10px;padding:10px 12px;">'+
+        '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">'+
+          '<span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:var(--ink-soft);">'+escapeHtml(a.Category)+'</span>'+
+          '<span style="font-weight:700;font-size:13px;flex:1;min-width:120px;">'+escapeHtml(a.Agency)+'</span>'+
+          '<span class="status-chip '+visA.cls+'"><span class="dot"></span>'+escapeHtml(a.Status)+'</span>'+
+          (STATE.role==='admin' ? '<button class="cat-remove-btn" title="Delete this task" onclick="deleteActivityPrompt(\''+a.ActivityID+'\',\''+jsAttr(a.Agency)+'\')">&times;</button>' : '')+
+        '</div>';
+      if(mats.length){
+        html += '<div class="table-wrap" style="margin-top:8px;"><table class="tracker"><thead><tr><th>Material</th><th>Unit</th><th>Qty</th>';
+        schema.materialStages.forEach(function(st){ html += '<th style="text-align:center">'+st+'</th>'; });
+        html += '<th></th></tr></thead><tbody>';
+        mats.forEach(function(r){
+          html += '<tr><td>'+escapeHtml(r.MaterialName)+'</td><td>'+escapeHtml(r.Unit)+'</td><td>'+r.Quantity+'</td>';
+          r.Stages.forEach(function(s){
+            var vis = deriveVisual(s.status, s.originalTarget, s.target);
+            var title = s.stage+': '+s.status+(vis.delayed?' (delayed)':'')+(s.target? ' · target '+fmtDate(s.target):'')+(s.delayReason?' · '+s.delayReason:'')+(s.note? ' · '+s.note:'');
+            html += '<td style="text-align:center"><div class="stage-cell '+vis.cls+'" title="'+escapeHtml(title)+'" '+
+              (editable? 'onclick="openStageModal(\''+r.BoqItemID+'\',\''+s.stage+'\')"' : 'onclick="openStageModal(\''+r.BoqItemID+'\',\''+s.stage+'\',true)"')+
+              '></div></td>';
+          });
+          html += '<td>'+(STATE.role==='admin' ? '<button class="cat-remove-btn" title="Remove this line" onclick="deleteBoqItemPrompt(\''+r.BoqItemID+'\',\''+jsAttr(r.MaterialName)+'\')">&times;</button>' : '')+'</td></tr>';
+        });
+        html += '</tbody></table></div>';
+      }
+      if(STATE.role==='admin'){
+        html += '<button class="btn small" style="margin-top:8px;" onclick="openAddMaterialModal(\''+sp.SpaceID+'\',\''+a.ActivityID+'\')">+ Material</button>';
+      }
+      html += '</div>';
+    });
+    html += '</div>';
   });
   if(!spaces.length) html += '<div class="empty-state">No spaces yet.</div>';
   return html;
@@ -958,13 +984,14 @@ function saveStage(boqItemId, stageName){
 // x Depth/Nos (measured items) — defaulted per-material in renderAmDetails,
 // user can always flip it via the link in amMeasurementHtml().
 var amDirectMode = true;
-function openAddMaterialModal(spaceId){
+function openAddMaterialModal(spaceId, activityId){
   var taxonomy = STATE.data.schema.taxonomy;
   var catKeys = Object.keys(taxonomy);
+  var act = activityId ? STATE.data.activities.filter(function(a){return a.ActivityID===activityId;})[0] : null;
   amDirectMode = true;
-  var body = '<h3>Add Material</h3>'+
+  var body = '<h3>Add Material'+(act?' — '+escapeHtml(act.Agency):'')+'</h3>'+
     '<div class="field"><label>Category</label><select id="am-cat" onchange="renderAmSubcatOptions()">'+
-      catKeys.map(function(c){return '<option value="'+escapeHtml(c)+'">'+escapeHtml(c)+'</option>';}).join('')+
+      catKeys.map(function(c){return '<option value="'+escapeHtml(c)+'" '+(act&&act.Category===c?'selected':'')+'>'+escapeHtml(c)+'</option>';}).join('')+
     '</select></div>'+
     '<div class="field"><label>Subcategory</label><select id="am-subcat" onchange="renderAmMaterialOptions()"></select></div>'+
     '<div class="field"><label>Material</label><select id="am-material" onchange="renderAmDetails()"></select></div>'+
@@ -979,9 +1006,17 @@ function openAddMaterialModal(spaceId){
     '</div>'+
     '<div class="field-hint">Quantity: <b id="am-qty-preview">&mdash;</b> &middot; Amount: <b id="am-amount">&mdash;</b></div>'+
     '<div class="modal-actions"><button class="btn" onclick="closeModal()">Cancel</button>'+
-    '<button class="btn primary" onclick="saveAddMaterial(\''+spaceId+'\',this)">Add to BOQ</button></div>';
+    '<button class="btn primary" onclick="saveAddMaterial(\''+spaceId+'\',\''+(activityId||'')+'\',this)">Add to BOQ</button></div>';
   showModal(body);
   renderAmSubcatOptions();
+  if(act){
+    var subVal = act.Subcategory+'|||'+(act.SubSubcategory||'');
+    var subSel = document.getElementById('am-subcat');
+    if(Array.from(subSel.options).some(function(o){return o.value===subVal;})){
+      subSel.value = subVal;
+      renderAmMaterialOptions();
+    }
+  }
 }
 function renderAmSubcatOptions(){
   var taxonomy = STATE.data.schema.taxonomy;
@@ -1061,7 +1096,7 @@ function renderAmAmount(){
   document.getElementById('am-qty-preview').textContent = qty;
   document.getElementById('am-amount').textContent = fmtMoney(qty*rate);
 }
-function saveAddMaterial(spaceId, btn){
+function saveAddMaterial(spaceId, activityId, btn){
   if(btn && btn.disabled) return;
   var materialId = document.getElementById('am-material').value;
   var length = document.getElementById('am-length').value;
@@ -1073,7 +1108,7 @@ function saveAddMaterial(spaceId, btn){
   if((Number(length)*Number(width)*Number(depthNos) + Number(contingency||0)) <= 0){ toast('Enter a measurement'); return; }
   btnBusy(btn);
   apiPost('addBoqItem', {
-    projectId: STATE.currentProjectId, spaceId: spaceId, materialId: materialId,
+    projectId: STATE.currentProjectId, spaceId: spaceId, materialId: materialId, activityId: activityId||'',
     length: length, width: width, depthNos: depthNos, contingency: contingency||0, revisedRate: revisedRate
   }).then(function(res){
     if(res && res.boqItem) STATE.data.boqItems.push(res.boqItem);
@@ -1189,11 +1224,9 @@ function renderScheduleChart(pid, opts){
   spaces.forEach(function(sp){
     var rows = acts.filter(function(a){ return a.SpaceID===sp.SpaceID; });
     if(!rows.length && opts.readOnly) return;
-    body += '<div class="sched-space-group"><div class="sched-space-title">'+escapeHtml(sp.Name)+
-      (opts.readOnly ? '' : ' <button class="btn small" style="font-weight:400;text-transform:none;letter-spacing:0;margin-left:4px;" onclick="openAddTasksModal(\''+sp.SpaceID+'\')">+ Add Tasks</button>')+
-      '</div>';
+    body += '<div class="sched-space-group"><div class="sched-space-title">'+escapeHtml(sp.Name)+'</div>';
     if(!rows.length){
-      body += '<div class="field-hint" style="margin:2px 0 10px 18px;">No tasks added yet for this space.</div></div>';
+      body += '<div class="field-hint" style="margin:2px 0 10px 18px;">No tasks yet — add tasks for this space in the Planning tab.</div></div>';
       return;
     }
     var byCat = {}, catOrder = [];
@@ -1228,7 +1261,7 @@ function renderScheduleChart(pid, opts){
 
   if(!hasTimeline){
     return opts.readOnly ? '<div class="empty-state">No schedule activities yet.</div>' :
-      '<div class="field-hint" style="margin-bottom:10px;">No tasks added to any space yet — use "+ Add Tasks" below a space to build its checklist.</div>'+
+      '<div class="field-hint" style="margin-bottom:10px;">No tasks added to any space yet — add tasks per space in the Planning tab first.</div>'+
       '<div class="sched-wrap"><div class="sched-grid" id="'+gridId+'">'+body+'</div></div>';
   }
 
@@ -1268,13 +1301,12 @@ function openAddTasksModal(spaceId){
         var value = cat+'|||'+l.subcategory+'|||'+l.subsubcategory;
         return '<label style="display:flex;align-items:center;gap:6px;font-size:12.5px;">'+
           '<input type="checkbox" class="at-leaf-cb" value="'+escapeHtml(value)+'">'+
-          '<span style="flex:1;">'+escapeHtml(l.label)+'</span>'+
-          '<input type="number" class="at-days" value="7" min="1" style="width:52px;"> days</label>';
+          '<span>'+escapeHtml(l.label)+'</span></label>';
       }).join('')+
       '</div></details>';
   }).join('');
   var body = '<h3>Add Tasks &mdash; '+escapeHtml(sp?sp.Name:'')+'</h3>'+
-    '<div class="field-hint" style="margin-bottom:8px;">Pick whichever tasks apply to this space and how many days each should take.</div>';
+    '<div class="field-hint" style="margin-bottom:8px;">Pick whichever tasks apply to this space — you can keep or delete any of them afterward, choose material and quantity per task here in Planning, and set timing/dependencies for each in the Schedule tab.</div>';
   if(!sections.replace(/\s/g,'').length){
     body += '<div class="empty-state">Every task has already been added to this space.</div>'+
       '<div class="modal-actions"><button class="btn" onclick="closeModal()">Close</button></div>';
@@ -1289,8 +1321,7 @@ function saveAddTasks(spaceId, btn){
   if(btn && btn.disabled) return;
   var items = Array.from(document.querySelectorAll('.at-leaf-cb:checked')).map(function(cb){
     var parts = cb.value.split('|||');
-    var daysInput = cb.closest('label').querySelector('.at-days');
-    return { category: parts[0], subcategory: parts[1], subsubcategory: parts[2], days: Number(daysInput.value)||7 };
+    return { category: parts[0], subcategory: parts[1], subsubcategory: parts[2] };
   });
   if(!items.length){ toast('Pick at least one task'); return; }
   btnBusy(btn);
@@ -1413,7 +1444,8 @@ function openActivityModal(activityId){
       '<div class="field"><label>% Complete</label><input type="number" id="act-percent" min="0" max="100" value="'+(act.PercentComplete||0)+'"></div>'+
     '</div>'+
     '<div class="field-row">'+
-      '<div class="field"><label>Start Date</label><input type="date" id="act-start" value="'+act.StartDate+'" onchange="syncActDuration()"></div>'+
+      '<div class="field"><label>Start Date</label><input type="date" id="act-start" value="'+act.StartDate+'" onchange="syncActDuration()" '+(preds.length?'disabled':'')+'>'+
+        '<div class="field-hint" id="act-start-hint" style="display:'+(preds.length?'block':'none')+';">Calculated from its dependency — uncheck it below to set manually.</div></div>'+
       '<div class="field"><label>Duration (days)</label><input type="number" id="act-duration" min="1" value="'+dayDiff(act.StartDate,act.EndDate)+'" oninput="syncActEndFromDuration()"></div>'+
     '</div>'+
     '<div class="field"><label>End Date</label><input type="date" id="act-end" value="'+act.EndDate+'" onchange="syncActDuration()"></div>'+
@@ -1452,6 +1484,11 @@ function actDepTypeOptions(selected){
 function toggleActDepType(cb){
   var sel = cb.closest('div').querySelector('.act-dep-type');
   if(sel) sel.disabled = !cb.checked;
+  var anyChecked = document.querySelectorAll('.act-dep-cb:checked').length > 0;
+  var startEl = document.getElementById('act-start');
+  var hintEl = document.getElementById('act-start-hint');
+  if(startEl) startEl.disabled = anyChecked;
+  if(hintEl) hintEl.style.display = anyChecked ? 'block' : 'none';
 }
 function syncActEndFromDuration(){
   var start = document.getElementById('act-start').value;
@@ -2170,6 +2207,14 @@ function renderMaterialsCatalogView(){
     }).join('')+
     '</tbody></table></div>';
   return html;
+}
+function deleteActivityPrompt(activityId, name){
+  if(!window.confirm('Delete task "'+name+'"? This also removes any material already chosen for it. This cannot be undone.')) return;
+  apiPost('deleteActivity', { activityId: activityId }).then(function(){
+    STATE.data.activities = STATE.data.activities.filter(function(a){ return a.ActivityID!==activityId; });
+    STATE.data.boqItems = STATE.data.boqItems.filter(function(b){ return b.ActivityID!==activityId; });
+    toast('Task deleted'); render();
+  }).catch(showErr);
 }
 function deleteBoqItemPrompt(boqItemId, name){
   if(!window.confirm('Remove "'+name+'" from this space\'s BOQ? This cannot be undone.')) return;
