@@ -21,33 +21,78 @@ var AGENCIES = [
   'Acoustics', 'Decor', 'Glass work', 'Modular Furniture', 'Sliding profile door'
 ];
 
-// Single taxonomy shared by both the Schedule execution checklist and the
-// Materials Catalog's Category/Subcategory — the user's own refined
-// Category -> Task/Material breakdown (replaces Phase 8's separate 27-item
-// EXECUTION_STAGES list and 11-category materials TAXONOMY, which had
-// diverged from each other). A space's checklist is built by picking a
-// subset of these categories (see addTaskCategoriesToSpace/deleteTaskCategory)
-// rather than every category being auto-seeded.
+// Three-level taxonomy (2026-08-01, from the user's final "categories.pdf")
+// — Category -> Subcategory -> optional Sub-subcategory. A Subcategory with
+// no sub-subcategories (empty array) is itself the leaf; one with entries
+// has each of those as its own leaf. Every leaf is one schedulable task /
+// one selectable material classification — the single source of truth for
+// both the Schedule checklist and the Materials Catalog's Category/
+// Subcategory/SubSubcategory fields (they share this taxonomy on purpose,
+// see the material rate-list Add Material work from earlier this session).
 var TAXONOMY = {
-  'CIVIL WORKS': ['Foundation', 'Column', 'Beam & Slab', 'Brickwork', 'Plaster', 'Waterproofing'],
-  'CONCEALED WORKS': ['Electrical Conduiting', 'Plumbing Concealed', 'HVAC', 'Automation & Security'],
-  'STONE & TILING WORKS': ['Jamming Works', 'Wall Tilings', 'Flooring', 'Staircase', 'Skirting'],
-  'FALSE CEILING': ['Framing Works', 'Enclosure', 'Lighting Fixtures Cutouts'],
-  'PAINT WORKS': ['Putty Works', 'Wall Painting', 'Veneer Polishing/PU'],
-  'CARPENTRY': ['DW Jamming', 'Wall Panelling Base', 'Wall Panelling Finishes', 'Door Installation', 'Furniture'],
-  'ELECTRICAL': ['Wiring', 'Switchboards', 'Lighting', 'Fans', 'Appliances'],
-  'PLUMBING': ['Sanitary Fittings'],
-  'MISC.': ['Window Installation', 'Marble Polishing', 'Fabrication'],
-  'MODULAR FURNITURE': ['Bed', 'Side Table', 'Console', 'TV Unit', 'Cabinet', 'Wardrobe', 'Kitchen', 'Sofa', 'Dining Table', 'Centre Table'],
-  'DECOR': ['Wall Decor', 'Lamps', 'Small Decor', 'Furnishing'],
-  'CLEANING AND HANDOVER': ['Cleaning', 'Handover']
+  'CIVIL WORKS': {
+    'FOUNDATION': [], 'COLUMN': [], 'BEAM & SLAB': [], 'BRICKWORK': [], 'PLASTER': [], 'WATERPROOFING': []
+  },
+  'CONCEALED WORKS': {
+    'ELECTRICAL': ['POWER', 'NETWORKING', 'SECURITY'],
+    'PLUMBING': ['UNDERGROUND SANITATION', 'FRESHWATER SUPPLY', 'DOWNTAKES', 'RAINWATER', 'HEAT PUMP SUPPLY & RETURN'],
+    'HVAC': ['COPPER PIPING', 'DRAIN']
+  },
+  'STONE & TILING WORKS': {
+    'JAMMING WORKS': ['PCC'],
+    'WALL TILINGS': ['TILE/STONE LAYING'],
+    'FLOORING': ['EPOXY/GROUTING WORKS'],
+    'STAIRCASE': ['POLISHING'],
+    'SKIRTING': ['TILE WASH']
+  },
+  'FALSE CEILING': {
+    'FRAMING WORKS': [], 'CLOSURE': []
+  },
+  'PAINT WORKS': {
+    'INTERIORS': ['PUTTY', 'PRIMER', 'BASE COAT', 'TOP COAT'],
+    'EXTERIOR': ['PRIMER', 'BASE COAT', 'TOP COAT'],
+    'FURNITURE': ['POLISH BASE COAT', 'POLISHING TOP COAT']
+  },
+  'ELECTRICAL': {
+    'WIRING': [], 'SWITCH SOCKET': [], 'LIGHTING & FIXTURES': []
+  },
+  'CARPENTRY': {
+    'WALL PANEL': ['BASE WORK', 'FINISHING WORK'],
+    'DOORS': ['FRAMES', 'PANEL'],
+    'FURNITURE': ['BED', 'BED-SIDES', 'TV UNIT', 'WARDROBES']
+  },
+  'FABRICATION': {
+    'WINDOWS': [], 'RAILING': [], 'GATE': [], 'DUCT COVERS': [], 'STAIRCASE': [], 'PERGOLA': [], 'GRILL': []
+  },
+  'FURNITURE': {
+    'MODULAR FURNITURE': [], 'LOOSE FURNITURE': []
+  },
+  'FURNISHING': {
+    'CURTAINS': [], 'TAPESTRY': [], 'DECOR': []
+  },
+  'HANDOVER': {
+    'CLEANING': [], 'CLOSURE': []
+  }
 };
-// Flattens TAXONOMY into an ordered [{category, task}, ...] list — the
-// single source of truth for both seeding order and dependency order.
+// Flattens TAXONOMY into an ordered list of leaves — the single source of
+// truth for both seeding order and dependency order. Each leaf carries its
+// full path (category/subcategory/subsubcategory) plus `task`, the label to
+// show/store as the schedulable activity or material classification (the
+// sub-subcategory when present, else the subcategory itself).
 function flattenTaxonomy_() {
   var out = [];
   Object.keys(TAXONOMY).forEach(function (cat) {
-    TAXONOMY[cat].forEach(function (task) { out.push({ category: cat, task: task }); });
+    var subs = TAXONOMY[cat];
+    Object.keys(subs).forEach(function (sub) {
+      var leaves = subs[sub];
+      if (!leaves.length) {
+        out.push({ category: cat, subcategory: sub, subsubcategory: '', task: sub });
+      } else {
+        leaves.forEach(function (leaf) {
+          out.push({ category: cat, subcategory: sub, subsubcategory: leaf, task: leaf });
+        });
+      }
+    });
   });
   return out;
 }
@@ -347,12 +392,12 @@ function spaceName_(spaceId) {
 var TABS = {
   PROJECTS: { name: 'PROJECTS', headers: ['ProjectID', 'Name', 'Address', 'StartDate', 'TargetMoveIn', 'Budget', 'ClientName', 'CreatedAt'] },
   SPACES: { name: 'SPACES', headers: ['SpaceID', 'ProjectID', 'Name', 'Floor', 'SortOrder', 'DesignJSON', 'DesignRollup'] },
-  MATERIALS_CONFIG: { name: 'MATERIALS_CONFIG', headers: ['MaterialID', 'Category', 'Subcategory', 'Name', 'Unit', 'Rate', 'Agency', 'Active', 'CreatedAt'] },
+  MATERIALS_CONFIG: { name: 'MATERIALS_CONFIG', headers: ['MaterialID', 'Category', 'Subcategory', 'Name', 'Unit', 'Rate', 'Agency', 'Active', 'CreatedAt', 'SubSubcategory'] },
   BOQ_ITEMS: {
     name: 'BOQ_ITEMS', headers: [
       'BoqItemID', 'ProjectID', 'SpaceID', 'MaterialID', 'MaterialName', 'Category', 'Subcategory', 'Agency',
       'Unit', 'Length', 'Width', 'DepthNos', 'Contingency', 'Rate', 'RevisedRate',
-      'StagesJSON', 'RollupStatus', 'Notes', 'ImagesJSON', 'CreatedAt', 'UpdatedAt'
+      'StagesJSON', 'RollupStatus', 'Notes', 'ImagesJSON', 'CreatedAt', 'UpdatedAt', 'SubSubcategory'
     ]
   },
   DAILY_LOG: { name: 'DAILY_LOG', headers: ['LogID', 'Date', 'ProjectID', 'SpaceID', 'Entry', 'LoggedBy', 'HasBlocker', 'CreatedAt', 'UpdatesJSON'] },
@@ -360,7 +405,8 @@ var TABS = {
     name: 'SCHEDULE_ACTIVITIES',
     headers: [
       'ActivityID', 'ProjectID', 'SpaceID', 'Agency', 'StartDate', 'EndDate', 'Status', 'PredecessorsJSON',
-      'Notes', 'CreatedAt', 'UpdatedAt', 'PercentComplete', 'OriginalStartDate', 'OriginalEndDate', 'DelayReason', 'Category'
+      'Notes', 'CreatedAt', 'UpdatedAt', 'PercentComplete', 'OriginalStartDate', 'OriginalEndDate', 'DelayReason', 'Category',
+      'Subcategory', 'SubSubcategory'
     ]
   }
 };
@@ -407,13 +453,17 @@ function getTab_(ss, key) {
     ensureColumn_(sh, 'OriginalEndDate', '');
     ensureColumn_(sh, 'DelayReason', '');
     ensureColumn_(sh, 'Category', '');
+    ensureColumn_(sh, 'Subcategory', '');
+    ensureColumn_(sh, 'SubSubcategory', '');
   } else if (key === 'DAILY_LOG') {
     ensureColumn_(sh, 'UpdatesJSON', '[]');
   } else if (key === 'BOQ_ITEMS') {
     ensureColumn_(sh, 'ImagesJSON', '[]');
     ensureColumn_(sh, 'Subcategory', '');
+    ensureColumn_(sh, 'SubSubcategory', '');
   } else if (key === 'MATERIALS_CONFIG') {
     ensureColumn_(sh, 'Subcategory', '');
+    ensureColumn_(sh, 'SubSubcategory', '');
   } else if (key === 'SPACES') {
     var defaultDesign = JSON.stringify(DESIGN_STAGES.map(function (s) {
       return { stage: s, status: 'Not Started', target: '', actual: '', note: '' };
@@ -640,10 +690,11 @@ function seedDemoProject_(ss) {
         delayReason = 'Material Selection Delay';
       }
       var activityId = 'ACT-' + Utilities.getUuid().slice(0, 6);
-      var predecessors = prevActivityId ? [prevActivityId] : [];
+      var predecessors = prevActivityId ? [{ id: prevActivityId, type: 'FS' }] : [];
       actSheet.appendRow([
         activityId, projectId, spaceId, t.task, startDate, endDate, status,
-        JSON.stringify(predecessors), '', now, now, percentComplete, originalStart, originalEnd, delayReason, t.category
+        JSON.stringify(predecessors), '', now, now, percentComplete, originalStart, originalEnd, delayReason,
+        t.category, t.subcategory, t.subsubcategory
       ]);
       prevActivityId = activityId;
       cursor = originalEnd;
@@ -770,7 +821,7 @@ function doPost(e) {
   var routes = {
     addProject: addProject, updateProject: updateProject, deleteProject: deleteProject, addSpace: addSpace,
     updateSpace: updateSpace, deleteSpace: deleteSpace,
-    addTaskCategoriesToSpace: addTaskCategoriesToSpace, deleteTaskCategory: deleteTaskCategory,
+    addTasksToSpace: addTasksToSpace, deleteTaskCategory: deleteTaskCategory,
     addMaterial: addMaterial, updateMaterial: updateMaterial, deleteMaterial: deleteMaterial,
     addBoqItem: addBoqItem, updateBoqItem: updateBoqItem, deleteBoqItem: deleteBoqItem,
     addBoqImage: addBoqImage, removeBoqImage: removeBoqImage,
@@ -835,7 +886,7 @@ function getAllData() {
     r.EndDate = normDate_(r.EndDate);
     r.OriginalStartDate = normDate_(r.OriginalStartDate) || r.StartDate;
     r.OriginalEndDate = normDate_(r.OriginalEndDate) || r.EndDate;
-    r.Predecessors = JSON.parse(r.PredecessorsJSON || '[]');
+    r.Predecessors = parsePredecessors_(r.PredecessorsJSON);
     return r;
   });
 
@@ -932,7 +983,7 @@ function addSpace(payload) {
   var sortOrder = existing.length + 1;
   var spaceId = addSpaceInternal_(spaceSheet, payload.projectId, payload.name, sortOrder, payload.floor);
   // No execution checklist is seeded here — the team picks which TAXONOMY
-  // categories actually apply to this space via addTaskCategoriesToSpace,
+  // leaves actually apply to this space via addTasksToSpace,
   // instead of every space getting all ~51 tasks whether relevant or not.
   return { spaceId: spaceId };
 }
@@ -971,7 +1022,7 @@ function deleteSpace(payload) {
 // ---------- Materials catalog CRUD ----------
 
 function addMaterial(payload) {
-  // payload: { category, subcategory, name, unit, rate, agency }
+  // payload: { category, subcategory, subsubcategory, name, unit, rate, agency }
   var ss = getSS_();
   var sheet = getTab_(ss, 'MATERIALS_CONFIG');
   var existingIds = rowsToObjects_(sheet).map(function (r) { return r.MaterialID; });
@@ -979,27 +1030,27 @@ function addMaterial(payload) {
   var now = new Date();
   sheet.appendRow([
     materialId, payload.category, payload.subcategory || '', payload.name, payload.unit,
-    Number(payload.rate) || 0, payload.agency, true, now
+    Number(payload.rate) || 0, payload.agency, true, now, payload.subsubcategory || ''
   ]);
   return {
     materialId: materialId,
     material: {
       MaterialID: materialId, Category: payload.category, Subcategory: payload.subcategory || '',
-      Name: payload.name, Unit: payload.unit, Rate: Number(payload.rate) || 0, Agency: payload.agency,
-      Active: true, CreatedAt: now.toISOString()
+      SubSubcategory: payload.subsubcategory || '', Name: payload.name, Unit: payload.unit,
+      Rate: Number(payload.rate) || 0, Agency: payload.agency, Active: true, CreatedAt: now.toISOString()
     }
   };
 }
 
 function updateMaterial(payload) {
-  // payload: { materialId, category, subcategory, name, unit, rate, agency, active }
+  // payload: { materialId, category, subcategory, subsubcategory, name, unit, rate, agency, active }
   var ss = getSS_();
   var sheet = getTab_(ss, 'MATERIALS_CONFIG');
   var row = findRowById_(sheet, 'MaterialID', payload.materialId);
   if (row < 0) throw new Error('Material not found');
   var headers = sheet.getDataRange().getValues()[0];
   var current = sheet.getRange(row, 1, 1, headers.length).getValues()[0];
-  var map = { Category: 'category', Subcategory: 'subcategory', Name: 'name', Unit: 'unit', Rate: 'rate', Agency: 'agency', Active: 'active' };
+  var map = { Category: 'category', Subcategory: 'subcategory', SubSubcategory: 'subsubcategory', Name: 'name', Unit: 'unit', Rate: 'rate', Agency: 'agency', Active: 'active' };
   headers.forEach(function (h, i) {
     if (map[h] && payload[map[h]] !== undefined) {
       current[i] = (h === 'Rate') ? Number(payload[map[h]]) : payload[map[h]];
@@ -1048,23 +1099,27 @@ function addBoqItem(payload) {
   boqSheet.appendRow([
     boqItemId, payload.projectId, payload.spaceId, material.MaterialID, material.Name, material.Category, material.Subcategory, material.Agency,
     material.Unit, length, width, depthNos, contingency, rate, revisedRate,
-    JSON.stringify(stages), 'Not Started', '', '[]', now, now
+    JSON.stringify(stages), 'Not Started', '', '[]', now, now, material.SubSubcategory || ''
   ]);
   var quantity = length * width * depthNos + contingency;
   var effectiveRate = revisedRate !== '' ? Number(revisedRate) : rate;
 
-  // Auto-add the material's own Category to this space's Schedule checklist
-  // if it isn't already there — planning a material implies its execution
-  // category applies to this space, without waiting for someone to also
-  // remember to add it manually in the Schedule tab. No-ops (returns no new
-  // activities) if that category was already present for this space.
-  var taskResult = addTaskCategoriesToSpace_(ss, payload.spaceId, [material.Category]);
+  // Auto-add the material's own leaf task (Category/Subcategory/
+  // SubSubcategory) to this space's Schedule checklist if it isn't already
+  // there — planning a material implies its execution task applies to this
+  // space, without waiting for someone to also remember to add it manually
+  // in the Schedule tab. No-ops (returns no new activities) if that exact
+  // leaf was already present for this space.
+  var taskResult = addTasksToSpace_(ss, payload.spaceId, [{
+    category: material.Category, subcategory: material.Subcategory, subsubcategory: material.SubSubcategory || ''
+  }]);
 
   return {
     boqItemId: boqItemId,
     boqItem: {
       BoqItemID: boqItemId, ProjectID: payload.projectId, SpaceID: payload.spaceId, MaterialID: material.MaterialID,
-      MaterialName: material.Name, Category: material.Category, Subcategory: material.Subcategory, Agency: material.Agency,
+      MaterialName: material.Name, Category: material.Category, Subcategory: material.Subcategory,
+      SubSubcategory: material.SubSubcategory || '', Agency: material.Agency,
       Unit: material.Unit, Length: length, Width: width, DepthNos: depthNos, Contingency: contingency,
       Rate: rate, RevisedRate: revisedRate, Stages: stages, RollupStatus: 'Not Started', Notes: '', Images: [],
       CreatedAt: now.toISOString(), UpdatedAt: now.toISOString(),
@@ -1076,23 +1131,26 @@ function addBoqItem(payload) {
 
 // ---------- Schedule / execution-stage activities ----------
 
-// Appends the tasks for whichever TAXONOMY categories apply to this space
-// (categories already present for the space are skipped, so calling this
-// again with a mix of old+new categories is safe). Dependencies stay
-// implicit-sequential — each new task's predecessor is the space's current
-// last task (whichever category that happened to be added in), continuing
-// one running checklist rather than restarting per category. Shared by the
-// manual addTaskCategoriesToSpace action and addBoqItem's auto-add (a
-// material's own Category, added to the space's Schedule the moment that
-// material is added to its BOQ — no date link between the two, the new
-// task just joins the space's existing sequential chain like any other).
-function addTaskCategoriesToSpace_(ss, spaceId, categories) {
+// Appends specific TAXONOMY leaf tasks to a space's Schedule checklist —
+// each item is one leaf (category/subcategory/subsubcategory) with its own
+// requested duration in days (default 7). Leaves already present for the
+// space (matched on the full category+subcategory+subsubcategory path, not
+// just the task label, since some labels like "Base Coat" repeat under
+// different subcategories) are skipped, so calling this again with a mix
+// of old+new leaves is safe. Dependencies stay implicit-sequential — each
+// new task's predecessor is the space's current last task, continuing one
+// running checklist. Shared by the manual "Add Tasks" action and
+// addBoqItem's auto-add (a material's own leaf, added to the space's
+// Schedule the moment that material is added to its BOQ — no date link
+// between the two, the new task just joins the existing sequential chain).
+function addTasksToSpace_(ss, spaceId, items) {
+  // items: [{category, subcategory, subsubcategory, days}, ...]
   var space = rowsToObjects_(getTab_(ss, 'SPACES')).filter(function (s) { return s.SpaceID === spaceId; })[0];
   if (!space) return { added: 0, activities: [] };
   var sheet = getTab_(ss, 'SCHEDULE_ACTIVITIES');
   var existing = rowsToObjects_(sheet).filter(function (a) { return a.SpaceID === spaceId; });
-  var existingCategories = {};
-  existing.forEach(function (a) { existingCategories[a.Category] = true; });
+  var existingKeys = {};
+  existing.forEach(function (a) { existingKeys[a.Category + '|' + a.Subcategory + '|' + a.SubSubcategory] = true; });
   var tail = existing.reduce(function (best, a) { return (!best || a.EndDate > best.EndDate) ? a : best; }, null);
   var prevActivityId = tail ? tail.ActivityID : '';
   var startDate = tail ? tail.EndDate : daysFromNowISO_(0);
@@ -1100,35 +1158,39 @@ function addTaskCategoriesToSpace_(ss, spaceId, categories) {
   var nowIso = now.toISOString();
   var rows = [];
   var created = [];
-  (categories || []).forEach(function (cat) {
-    if (existingCategories[cat] || !TAXONOMY[cat]) return;
-    TAXONOMY[cat].forEach(function (task) {
-      var endDate = addDaysISO_(startDate, 7);
-      var activityId = 'ACT-' + Utilities.getUuid().slice(0, 6);
-      var predecessors = prevActivityId ? [prevActivityId] : [];
-      rows.push([
-        activityId, space.ProjectID, spaceId, task, startDate, endDate,
-        'Not Started', JSON.stringify(predecessors), '', now, now, 0, startDate, endDate, '', cat
-      ]);
-      created.push({
-        ActivityID: activityId, ProjectID: space.ProjectID, SpaceID: spaceId, Agency: task,
-        StartDate: startDate, EndDate: endDate, Status: 'Not Started', Predecessors: predecessors,
-        Notes: '', CreatedAt: nowIso, UpdatedAt: nowIso, PercentComplete: 0,
-        OriginalStartDate: startDate, OriginalEndDate: endDate, DelayReason: '', Category: cat
-      });
-      prevActivityId = activityId;
-      startDate = endDate;
+  (items || []).forEach(function (item) {
+    var cat = item.category, sub = item.subcategory, subsub = item.subsubcategory || '';
+    if (!cat || !sub) return;
+    var key = cat + '|' + sub + '|' + subsub;
+    if (existingKeys[key]) return;
+    var task = subsub || sub;
+    var days = Math.max(1, Math.round(Number(item.days)) || 7);
+    var endDate = addDaysISO_(startDate, days);
+    var activityId = 'ACT-' + Utilities.getUuid().slice(0, 6);
+    var predecessors = prevActivityId ? [{ id: prevActivityId, type: 'FS' }] : [];
+    rows.push([
+      activityId, space.ProjectID, spaceId, task, startDate, endDate,
+      'Not Started', JSON.stringify(predecessors), '', now, now, 0, startDate, endDate, '', cat, sub, subsub
+    ]);
+    created.push({
+      ActivityID: activityId, ProjectID: space.ProjectID, SpaceID: spaceId, Agency: task,
+      StartDate: startDate, EndDate: endDate, Status: 'Not Started', Predecessors: predecessors,
+      Notes: '', CreatedAt: nowIso, UpdatedAt: nowIso, PercentComplete: 0,
+      OriginalStartDate: startDate, OriginalEndDate: endDate, DelayReason: '',
+      Category: cat, Subcategory: sub, SubSubcategory: subsub
     });
-    existingCategories[cat] = true;
+    prevActivityId = activityId;
+    startDate = endDate;
+    existingKeys[key] = true;
   });
   if (rows.length) sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, rows[0].length).setValues(rows);
   return { added: rows.length, activities: created };
 }
 
-function addTaskCategoriesToSpace(payload) {
-  // payload: { spaceId, categories: [categoryName, ...] }
+function addTasksToSpace(payload) {
+  // payload: { spaceId, items: [{category, subcategory, subsubcategory, days}, ...] }
   var ss = getSS_();
-  return addTaskCategoriesToSpace_(ss, payload.spaceId, payload.categories);
+  return addTasksToSpace_(ss, payload.spaceId, payload.items);
 }
 
 // Removes every task under one TAXONOMY category for one space — lets the
@@ -1252,7 +1314,8 @@ function submitActivityUpdates(payload) {
 }
 
 function setActivityDependencies(payload) {
-  // payload: { activityId, predecessors: [ActivityID, ...] }
+  // payload: { activityId, predecessors: [{id, type}, ...] } — a plain ID
+  // string is also accepted per entry and defaults to type 'FS'.
   var ss = getSS_();
   var sheet = getTab_(ss, 'SCHEDULE_ACTIVITIES');
   var row = findRowById_(sheet, 'ActivityID', payload.activityId);
@@ -1260,19 +1323,50 @@ function setActivityDependencies(payload) {
   var headers = sheet.getDataRange().getValues()[0];
   var predColIdx = headers.indexOf('PredecessorsJSON');
   var updatedColIdx = headers.indexOf('UpdatedAt');
-  var predecessors = (payload.predecessors || []).filter(function (id) { return id !== payload.activityId; });
+  var predecessors = (payload.predecessors || [])
+    .map(function (p) {
+      return (typeof p === 'string') ? { id: p, type: 'FS' } : { id: p.id, type: LINK_TYPES.indexOf(p.type) > -1 ? p.type : 'FS' };
+    })
+    .filter(function (p) { return p.id && p.id !== payload.activityId; });
   sheet.getRange(row, predColIdx + 1).setValue(JSON.stringify(predecessors));
   sheet.getRange(row, updatedColIdx + 1).setValue(new Date());
 
-  predecessors.forEach(function (predId) { cascadeFromActivity_(ss, predId); });
+  cascadeFromActivity_(ss, payload.activityId);
+  predecessors.forEach(function (p) { cascadeFromActivity_(ss, p.id); });
   return { ok: true };
 }
 
 
-// Finish-to-start cascade: any activity that lists `activityId` as a predecessor
-// must start no earlier than that predecessor's end. If violated, shift the
-// dependent forward (preserving its own duration) and recurse into its own
-// dependents. `visited` guards against an accidental cycle.
+// Four standard scheduling link types. Stored per-predecessor in
+// PredecessorsJSON as {id, type}; a plain string entry (every activity
+// created before this link-type feature) is treated as {id: <string>,
+// type: 'FS'} — see parsePredecessors_.
+var LINK_TYPES = ['FS', 'SS', 'FF', 'SF'];
+
+function parsePredecessors_(json) {
+  var arr = JSON.parse(json || '[]');
+  return arr.map(function (p) {
+    if (typeof p === 'string') return { id: p, type: 'FS' };
+    return { id: p.id, type: LINK_TYPES.indexOf(p.type) > -1 ? p.type : 'FS' };
+  });
+}
+
+// Recomputes every activity's dates from its predecessors' CURRENT dates,
+// walking forward through the dependency graph starting at `activityId`.
+// Each link type constrains a different pair of endpoints:
+//   FS: successor.Start >= predecessor.End    (the old, only, behavior)
+//   SS: successor.Start >= predecessor.Start
+//   FF: successor.End   >= predecessor.End
+//   SF: successor.End   >= predecessor.Start
+// Unlike the old "push forward if violated" rule, this always repositions
+// the successor to sit exactly at the constraint, in either direction — so
+// a predecessor finishing early pulls its successor earlier too, and a
+// pure duration change (which moves the predecessor's End with no other
+// edit) cascades the same way a manual date drag does. The successor's own
+// duration (End-Start) is always preserved; when an activity has several
+// predecessors, the latest date any of their links require wins (matching
+// how every other CPM scheduler resolves multiple predecessors). `visited`
+// guards against a dependency cycle.
 function cascadeFromActivity_(ss, activityId, visited) {
   visited = visited || {};
   if (visited[activityId]) return;
@@ -1280,24 +1374,48 @@ function cascadeFromActivity_(ss, activityId, visited) {
 
   var sheet = getTab_(ss, 'SCHEDULE_ACTIVITIES');
   var all = rowsToObjects_(sheet);
-  var predecessor = all.filter(function (a) { return a.ActivityID === activityId; })[0];
-  if (!predecessor) return;
-  var predEnd = normDate_(predecessor.EndDate) || predecessor.EndDate;
-
+  var byId = {};
+  all.forEach(function (a) { byId[a.ActivityID] = a; });
   var headers = sheet.getDataRange().getValues()[0];
   var idx = {};
   headers.forEach(function (h, i) { idx[h] = i; });
 
   all.forEach(function (successor) {
-    var preds = JSON.parse(successor.PredecessorsJSON || '[]');
-    if (preds.indexOf(activityId) === -1) return;
+    var preds = parsePredecessors_(successor.PredecessorsJSON);
+    if (!preds.some(function (p) { return p.id === activityId; })) return;
+
     var succStart = normDate_(successor.StartDate) || successor.StartDate;
     var succEnd = normDate_(successor.EndDate) || successor.EndDate;
-    if (succStart >= predEnd) return; // already satisfied
+    var durationMs = new Date(succEnd) - new Date(succStart);
 
-    var deltaMs = new Date(predEnd) - new Date(succStart);
-    var newStart = shiftDateISO_(succStart, deltaMs);
-    var newEnd = shiftDateISO_(succEnd, deltaMs);
+    // Combine constraints from ALL this successor's predecessors (not just
+    // the one that triggered this call) so a multi-predecessor activity
+    // always sits at whichever date any of its links currently require.
+    var startFloor = null, endFloor = null;
+    preds.forEach(function (p) {
+      var pred = byId[p.id];
+      if (!pred) return;
+      var pStart = normDate_(pred.StartDate) || pred.StartDate;
+      var pEnd = normDate_(pred.EndDate) || pred.EndDate;
+      if (p.type === 'FS') startFloor = laterDate_(startFloor, pEnd);
+      else if (p.type === 'SS') startFloor = laterDate_(startFloor, pStart);
+      else if (p.type === 'FF') endFloor = laterDate_(endFloor, pEnd);
+      else if (p.type === 'SF') endFloor = laterDate_(endFloor, pStart);
+    });
+    if (startFloor === null && endFloor === null) return;
+
+    var newStart, newEnd;
+    if (startFloor !== null && endFloor !== null) {
+      newStart = laterDate_(startFloor, addMs_(endFloor, -durationMs));
+      newEnd = addMs_(newStart, durationMs);
+    } else if (startFloor !== null) {
+      newStart = startFloor;
+      newEnd = addMs_(newStart, durationMs);
+    } else {
+      newEnd = endFloor;
+      newStart = addMs_(newEnd, -durationMs);
+    }
+    if (newStart === succStart && newEnd === succEnd) return; // already satisfied
 
     var current = sheet.getRange(successor._row, 1, 1, headers.length).getValues()[0];
     current[idx.StartDate] = newStart;
@@ -1309,7 +1427,12 @@ function cascadeFromActivity_(ss, activityId, visited) {
   });
 }
 
-function shiftDateISO_(iso, deltaMs) {
+function laterDate_(a, b) {
+  if (a === null) return b;
+  if (b === null) return a;
+  return a > b ? a : b;
+}
+function addMs_(iso, deltaMs) {
   var d = new Date(iso);
   d.setTime(d.getTime() + deltaMs);
   return Utilities.formatDate(d, 'Asia/Kolkata', 'yyyy-MM-dd');

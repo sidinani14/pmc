@@ -392,6 +392,32 @@ function escapeHtml(s){
 // silently breaks that onclick handler. This escapes the backslash and
 // quote for the JS string first, then only the attribute-delimiter-unsafe
 // characters (& and ") for HTML — never re-touches the JS-escaped quote.
+// TAXONOMY is Category -> Subcategory -> [Subsubcategory, ...] (empty array
+// means the Subcategory itself is the leaf). Every cascading Category/
+// Subcategory picker in this app (Add Material, Materials Catalog, Add
+// Tasks) shows one flattened "Subcategory" dropdown per category rather
+// than a 3rd dropdown — each option's value packs subcategory+subsubcategory
+// together (sep '|||') so both can be recovered on selection.
+function taxonomyLeaves(taxonomy, cat){
+  var subs = (taxonomy && taxonomy[cat]) || {};
+  var out = [];
+  Object.keys(subs).forEach(function(sub){
+    var leaves = subs[sub];
+    if(!leaves || !leaves.length){
+      out.push({subcategory: sub, subsubcategory: '', label: sub});
+    } else {
+      leaves.forEach(function(leaf){
+        out.push({subcategory: sub, subsubcategory: leaf, label: sub+' — '+leaf});
+      });
+    }
+  });
+  return out;
+}
+function taxonomyLeafValue(l){ return l.subcategory + '|||' + l.subsubcategory; }
+function parseTaxonomyLeafValue(v){
+  var parts = (v||'').split('|||');
+  return { subcategory: parts[0]||'', subsubcategory: parts[1]||'' };
+}
 function jsAttr(s){
   return String(s==null?'':s).replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/&/g,'&amp;').replace(/"/g,'&quot;');
 }
@@ -714,7 +740,7 @@ function statBox(label, value, tone){
 // current dates, delay reason, and critical-path status.
 function spaceActivityChips(pid, spaceId){
   var acts = activitiesOf(pid).filter(function(a){ return a.SpaceID===spaceId; });
-  if(!acts.length) return '<div class="space-chip-row"><span style="font-size:12px;color:var(--ink-soft);">No categories added to this space yet</span></div>';
+  if(!acts.length) return '<div class="space-chip-row"><span style="font-size:12px;color:var(--ink-soft);">No tasks added to this space yet</span></div>';
   var critical = computeCriticalPath(pid).map(function(a){return a.ActivityID;});
   var byCat = {}, catOrder = [];
   acts.forEach(function(a){
@@ -939,8 +965,8 @@ function openAddMaterialModal(spaceId){
 function renderAmSubcatOptions(){
   var taxonomy = STATE.data.schema.taxonomy;
   var cat = document.getElementById('am-cat').value;
-  document.getElementById('am-subcat').innerHTML = (taxonomy[cat]||[]).map(function(sc){
-    return '<option>'+escapeHtml(sc)+'</option>';
+  document.getElementById('am-subcat').innerHTML = taxonomyLeaves(taxonomy, cat).map(function(l){
+    return '<option value="'+escapeHtml(taxonomyLeafValue(l))+'">'+escapeHtml(l.label)+'</option>';
   }).join('');
   renderAmMaterialOptions();
 }
@@ -979,8 +1005,10 @@ function amToggleMode(){
 }
 function renderAmMaterialOptions(){
   var cat = document.getElementById('am-cat').value;
-  var subcat = document.getElementById('am-subcat').value;
-  var mats = STATE.data.materialsConfig.filter(function(m){ return m.Category===cat && m.Subcategory===subcat; });
+  var leaf = parseTaxonomyLeafValue(document.getElementById('am-subcat').value);
+  var mats = STATE.data.materialsConfig.filter(function(m){
+    return m.Category===cat && m.Subcategory===leaf.subcategory && (m.SubSubcategory||'')===leaf.subsubcategory;
+  });
   document.getElementById('am-material').innerHTML = mats.length ?
     mats.map(function(m){
       return '<option value="'+m.MaterialID+'">'+escapeHtml(m.Name)+' ('+fmtMoney(m.Rate)+'/'+escapeHtml(m.Unit)+')</option>';
@@ -1061,7 +1089,7 @@ function computeCriticalPath(projectId){
   var current = tail;
   var guard = 0;
   while(guard++ < acts.length){
-    var preds = (current.Predecessors||[]).map(function(id){ return byId[id]; }).filter(Boolean);
+    var preds = (current.Predecessors||[]).map(function(p){ return byId[p.id]; }).filter(Boolean);
     var zeroSlack = preds.filter(function(p){ return p.EndDate === current.StartDate; });
     if(!zeroSlack.length) break;
     zeroSlack.sort(function(a,b){ return b.EndDate>a.EndDate?1:-1; });
@@ -1141,10 +1169,10 @@ function renderScheduleChart(pid, opts){
     var rows = acts.filter(function(a){ return a.SpaceID===sp.SpaceID; });
     if(!rows.length && opts.readOnly) return;
     body += '<div class="sched-space-group"><div class="sched-space-title">'+escapeHtml(sp.Name)+
-      (opts.readOnly ? '' : ' <button class="btn small" style="font-weight:400;text-transform:none;letter-spacing:0;margin-left:4px;" onclick="openAddCategoriesModal(\''+sp.SpaceID+'\')">+ Categories</button>')+
+      (opts.readOnly ? '' : ' <button class="btn small" style="font-weight:400;text-transform:none;letter-spacing:0;margin-left:4px;" onclick="openAddTasksModal(\''+sp.SpaceID+'\')">+ Add Tasks</button>')+
       '</div>';
     if(!rows.length){
-      body += '<div class="field-hint" style="margin:2px 0 10px 18px;">No categories added yet for this space.</div></div>';
+      body += '<div class="field-hint" style="margin:2px 0 10px 18px;">No tasks added yet for this space.</div></div>';
       return;
     }
     var byCat = {}, catOrder = [];
@@ -1179,7 +1207,7 @@ function renderScheduleChart(pid, opts){
 
   if(!hasTimeline){
     return opts.readOnly ? '<div class="empty-state">No schedule activities yet.</div>' :
-      '<div class="field-hint" style="margin-bottom:10px;">No categories added to any space yet — use "+ Categories" below a space to build its checklist.</div>'+
+      '<div class="field-hint" style="margin-bottom:10px;">No tasks added to any space yet — use "+ Add Tasks" below a space to build its checklist.</div>'+
       '<div class="sched-wrap"><div class="sched-grid" id="'+gridId+'">'+body+'</div></div>';
   }
 
@@ -1194,37 +1222,60 @@ function renderScheduleChart(pid, opts){
     '</div></div>';
 }
 
-function openAddCategoriesModal(spaceId){
+// Every leaf across all 11 categories, grouped into collapsible <details>
+// sections, each leaf a checkbox + a days-duration input — lets the team
+// pick exactly which tasks apply to a space AND set each one's duration in
+// a single pass, instead of adding a whole category then opening each
+// activity individually just to change its duration (slow, and each open
+// is its own round-trip).
+function openAddTasksModal(spaceId){
   var taxonomy = STATE.data.schema.taxonomy;
   var existing = {};
-  activitiesOf(STATE.currentProjectId).filter(function(a){ return a.SpaceID===spaceId; }).forEach(function(a){ existing[a.Category]=true; });
-  var available = Object.keys(taxonomy).filter(function(c){ return !existing[c]; });
+  activitiesOf(STATE.currentProjectId).filter(function(a){ return a.SpaceID===spaceId; }).forEach(function(a){
+    existing[a.Category+'|'+a.Subcategory+'|'+(a.SubSubcategory||'')] = true;
+  });
   var sp = STATE.data.spaces.filter(function(s){ return s.SpaceID===spaceId; })[0];
-  var body = '<h3>Add Categories &mdash; '+escapeHtml(sp?sp.Name:'')+'</h3>'+
-    '<div class="field-hint" style="margin-bottom:8px;">Pick whichever task categories apply to this space — each one adds its full task checklist.</div>';
-  if(!available.length){
-    body += '<div class="empty-state">Every category has already been added to this space.</div>'+
+  var sections = Object.keys(taxonomy).map(function(cat){
+    var leaves = taxonomyLeaves(taxonomy, cat).filter(function(l){
+      return !existing[cat+'|'+l.subcategory+'|'+l.subsubcategory];
+    });
+    if(!leaves.length) return '';
+    return '<details style="margin-bottom:6px;"><summary style="cursor:pointer;font-weight:700;font-size:12.5px;padding:4px 0;">'+escapeHtml(cat)+
+      ' <span style="font-weight:400;color:var(--ink-soft);">('+leaves.length+')</span></summary>'+
+      '<div style="padding:2px 0 8px 18px;display:flex;flex-direction:column;gap:5px;">'+
+      leaves.map(function(l){
+        var value = cat+'|||'+l.subcategory+'|||'+l.subsubcategory;
+        return '<label style="display:flex;align-items:center;gap:6px;font-size:12.5px;">'+
+          '<input type="checkbox" class="at-leaf-cb" value="'+escapeHtml(value)+'">'+
+          '<span style="flex:1;">'+escapeHtml(l.label)+'</span>'+
+          '<input type="number" class="at-days" value="7" min="1" style="width:52px;"> days</label>';
+      }).join('')+
+      '</div></details>';
+  }).join('');
+  var body = '<h3>Add Tasks &mdash; '+escapeHtml(sp?sp.Name:'')+'</h3>'+
+    '<div class="field-hint" style="margin-bottom:8px;">Pick whichever tasks apply to this space and how many days each should take.</div>';
+  if(!sections.replace(/\s/g,'').length){
+    body += '<div class="empty-state">Every task has already been added to this space.</div>'+
       '<div class="modal-actions"><button class="btn" onclick="closeModal()">Close</button></div>';
   } else {
-    body += '<div style="display:flex;flex-direction:column;gap:6px;max-height:320px;overflow:auto;">'+
-      available.map(function(c){
-        return '<label style="display:flex;align-items:center;gap:8px;font-size:13px;"><input type="checkbox" class="ac-cat-cb" value="'+escapeHtml(c)+'"> '+escapeHtml(c)+
-          ' <span style="color:var(--ink-soft);font-size:11px;">('+taxonomy[c].length+' tasks)</span></label>';
-      }).join('')+
-      '</div>'+
+    body += '<div style="max-height:420px;overflow:auto;">'+sections+'</div>'+
       '<div class="modal-actions"><button class="btn" onclick="closeModal()">Cancel</button>'+
-      '<button class="btn primary" onclick="saveAddCategories(\''+spaceId+'\',this)">Add Selected</button></div>';
+      '<button class="btn primary" onclick="saveAddTasks(\''+spaceId+'\',this)">Add Selected</button></div>';
   }
   showModal(body);
 }
-function saveAddCategories(spaceId, btn){
+function saveAddTasks(spaceId, btn){
   if(btn && btn.disabled) return;
-  var cats = Array.from(document.querySelectorAll('.ac-cat-cb:checked')).map(function(cb){ return cb.value; });
-  if(!cats.length){ toast('Pick at least one category'); return; }
+  var items = Array.from(document.querySelectorAll('.at-leaf-cb:checked')).map(function(cb){
+    var parts = cb.value.split('|||');
+    var daysInput = cb.closest('label').querySelector('.at-days');
+    return { category: parts[0], subcategory: parts[1], subsubcategory: parts[2], days: Number(daysInput.value)||7 };
+  });
+  if(!items.length){ toast('Pick at least one task'); return; }
   btnBusy(btn);
-  apiPost('addTaskCategoriesToSpace', { spaceId: spaceId, categories: cats }).then(function(res){
+  apiPost('addTasksToSpace', { spaceId: spaceId, items: items }).then(function(res){
     if(res && res.activities && res.activities.length) STATE.data.activities = STATE.data.activities.concat(res.activities);
-    closeModal(); toast('Categories added'); render();
+    closeModal(); toast('Tasks added'); render();
   }).catch(function(err){ btnReset(btn); showErr(err); });
 }
 function deleteTaskCategoryPrompt(spaceId, category){
@@ -1262,7 +1313,8 @@ function drawDependencyLines(gridId, svgId, projectId){
   var lines = '';
   var acts = activitiesOf(projectId||STATE.currentProjectId);
   acts.forEach(function(a){
-    (a.Predecessors||[]).forEach(function(predId){
+    (a.Predecessors||[]).forEach(function(p){
+      var predId = p.id;
       var predEl = grid.querySelector('.sched-bar[data-activity-id="'+predId+'"]');
       var succEl = grid.querySelector('.sched-bar[data-activity-id="'+a.ActivityID+'"]');
       if(!predEl || !succEl) return;
@@ -1347,17 +1399,37 @@ function openActivityModal(activityId){
       DELAY_REASONS.map(function(r){return '<option '+(act.DelayReason===r?'selected':'')+'>'+r+'</option>';}).join('')+
       '</select></div>' : '')+
     '<div class="field"><label>Notes</label><textarea id="act-notes">'+escapeHtml(act.Notes||'')+'</textarea></div>'+
-    '<div class="field"><label>Depends on (must finish before this can start)</label>'+
+    '<div class="field"><label>Depends on (predecessor + how it links)</label>'+
     (others.length ? others.map(function(o){
       var osp = STATE.data.spaces.filter(function(s){return s.SpaceID===o.SpaceID;})[0];
-      return '<label style="display:flex;align-items:center;gap:7px;margin:4px 0;font-weight:400;font-size:13px;">'+
-        '<input type="checkbox" class="act-dep-cb" value="'+o.ActivityID+'" style="width:auto;" '+(preds.indexOf(o.ActivityID)>-1?'checked':'')+'> '+
-        escapeHtml((osp?osp.Name:'')+' — '+o.Agency)+'</label>';
+      var link = preds.filter(function(p){ return p.id===o.ActivityID; })[0];
+      return '<div style="display:flex;align-items:center;gap:7px;margin:4px 0;">'+
+        '<label style="display:flex;align-items:center;gap:7px;font-weight:400;font-size:13px;flex:1;">'+
+        '<input type="checkbox" class="act-dep-cb" value="'+o.ActivityID+'" style="width:auto;" '+(link?'checked':'')+' onchange="toggleActDepType(this)"> '+
+        escapeHtml((osp?osp.Name:'')+' — '+o.Agency)+'</label>'+
+        '<select class="act-dep-type" data-for="'+o.ActivityID+'" style="width:auto;font-size:11.5px;padding:3px 4px;" '+(link?'':'disabled')+'>'+
+          actDepTypeOptions(link?link.type:'FS')+
+        '</select></div>';
     }).join('') : '<div class="field-hint">No other activities in this project yet.</div>')+
     '</div>'+
     '<div class="modal-actions"><button class="btn" onclick="closeModal()">Cancel</button>'+
     '<button class="btn primary" id="act-save-btn" onclick="saveActivity(\''+activityId+'\')">Save</button></div>';
   showModal(body);
+}
+// Matches Code.js's LINK_TYPES exactly — the four standard scheduling link
+// types. FS (finish of predecessor -> start of this) is the default and
+// covers the vast majority of links; the other three exist for the cases
+// where two tasks genuinely need to move in lockstep a different way (e.g.
+// SS for "paint base coat and top coat start together").
+var LINK_TYPE_LABELS = { FS: 'Finish → Start', SS: 'Start → Start', FF: 'Finish → Finish', SF: 'Start → Finish' };
+function actDepTypeOptions(selected){
+  return Object.keys(LINK_TYPE_LABELS).map(function(t){
+    return '<option value="'+t+'" '+(t===selected?'selected':'')+'>'+LINK_TYPE_LABELS[t]+'</option>';
+  }).join('');
+}
+function toggleActDepType(cb){
+  var sel = cb.closest('div').querySelector('.act-dep-type');
+  if(sel) sel.disabled = !cb.checked;
 }
 function syncActEndFromDuration(){
   var start = document.getElementById('act-start').value;
@@ -1382,9 +1454,12 @@ function saveActivity(activityId){
     percentComplete: Number(document.getElementById('act-percent').value)||0,
     delayReason: reasonEl ? reasonEl.value : ''
   };
-  var deps = Array.from(document.querySelectorAll('.act-dep-cb:checked')).map(function(cb){return cb.value;}).sort();
+  var deps = Array.from(document.querySelectorAll('.act-dep-cb:checked')).map(function(cb){
+    var sel = document.querySelector('.act-dep-type[data-for="'+cb.value+'"]');
+    return { id: cb.value, type: sel ? sel.value : 'FS' };
+  }).sort(function(a,b){ return a.id<b.id?-1:a.id>b.id?1:0; });
   var act = STATE.data.activities.filter(function(a){return a.ActivityID===activityId;})[0];
-  var currentDeps = ((act&&act.Predecessors)||[]).slice().sort();
+  var currentDeps = ((act&&act.Predecessors)||[]).slice().sort(function(a,b){ return a.id<b.id?-1:a.id>b.id?1:0; });
   var depsChanged = JSON.stringify(deps) !== JSON.stringify(currentDeps);
 
   var btn = document.getElementById('act-save-btn');
@@ -2017,8 +2092,11 @@ function renderMaterialsCatalogView(){
     rows.forEach(function(m){
       html += '<tr>'+
         '<td><input class="inline-edit" value="'+escapeHtml(m.Name)+'" onchange="saveMaterialField(\''+m.MaterialID+'\',\'name\',this.value)"></td>'+
-        '<td><select class="inline-edit" onchange="saveMaterialField(\''+m.MaterialID+'\',\'subcategory\',this.value)">'+
-          (taxonomy[cat]||[]).map(function(sc){return '<option '+(m.Subcategory===sc?'selected':'')+'>'+escapeHtml(sc)+'</option>';}).join('')+
+        '<td><select class="inline-edit" onchange="saveMaterialLeaf(\''+m.MaterialID+'\',this.value)">'+
+          taxonomyLeaves(taxonomy, cat).map(function(l){
+            var sel = (m.Subcategory===l.subcategory && (m.SubSubcategory||'')===l.subsubcategory) ? 'selected' : '';
+            return '<option value="'+escapeHtml(taxonomyLeafValue(l))+'" '+sel+'>'+escapeHtml(l.label)+'</option>';
+          }).join('')+
         '</select></td>'+
         '<td><input class="inline-edit" style="width:70px;" value="'+escapeHtml(m.Unit)+'" onchange="saveMaterialField(\''+m.MaterialID+'\',\'unit\',this.value)"></td>'+
         '<td><div class="rate-prefix"><span>&#8377;</span><input class="inline-edit" type="number" style="width:75px;" value="'+(m.Rate||0)+'" onchange="saveMaterialField(\''+m.MaterialID+'\',\'rate\',this.value)"></div></td>'+
@@ -2053,6 +2131,12 @@ function deleteMaterialPrompt(materialId, name){
     toast('Material deleted'); render();
   }).catch(showErr);
 }
+function saveMaterialLeaf(materialId, leafValue){
+  var leaf = parseTaxonomyLeafValue(leafValue);
+  var m = STATE.data.materialsConfig.filter(function(x){return x.MaterialID===materialId;})[0];
+  if(m){ m.Subcategory = leaf.subcategory; m.SubSubcategory = leaf.subsubcategory; }
+  apiPost('updateMaterial', { materialId: materialId, subcategory: leaf.subcategory, subsubcategory: leaf.subsubcategory }).catch(function(err){ showErr(err); refresh(); });
+}
 function saveMaterialField(materialId, field, value){
   var m = STATE.data.materialsConfig.filter(function(x){return x.MaterialID===materialId;})[0];
   if(!m) return;
@@ -2066,8 +2150,8 @@ function saveMaterialField(materialId, field, value){
 // the new Category's first option since the old one likely no longer applies.
 function saveMaterialCategory(materialId, newCategory){
   var taxonomy = STATE.data.schema.taxonomy;
-  var newSub = (taxonomy[newCategory]||[])[0] || '';
-  apiPost('updateMaterial', { materialId: materialId, category: newCategory, subcategory: newSub }).then(function(){
+  var firstLeaf = taxonomyLeaves(taxonomy, newCategory)[0] || {subcategory:'', subsubcategory:''};
+  apiPost('updateMaterial', { materialId: materialId, category: newCategory, subcategory: firstLeaf.subcategory, subsubcategory: firstLeaf.subsubcategory }).then(function(){
     toast('Category updated'); refresh();
   }).catch(showErr);
 }
@@ -2095,8 +2179,8 @@ function materialFormBody(title, m){
 function renderMtSubcategoryOptions(){
   var taxonomy = STATE.data.schema.taxonomy;
   var cat = document.getElementById('mt-cat').value;
-  document.getElementById('mt-subcat').innerHTML = (taxonomy[cat]||[]).map(function(sc){
-    return '<option>'+escapeHtml(sc)+'</option>';
+  document.getElementById('mt-subcat').innerHTML = taxonomyLeaves(taxonomy, cat).map(function(l){
+    return '<option value="'+escapeHtml(taxonomyLeafValue(l))+'">'+escapeHtml(l.label)+'</option>';
   }).join('');
 }
 function openAddMaterialToCatalogModal(){
@@ -2108,9 +2192,11 @@ function openAddMaterialToCatalogModal(){
 }
 function saveNewMaterial(btn){
   if(btn && btn.disabled) return;
+  var leaf = parseTaxonomyLeafValue(document.getElementById('mt-subcat').value);
   var payload = {
     category: document.getElementById('mt-cat').value,
-    subcategory: document.getElementById('mt-subcat').value,
+    subcategory: leaf.subcategory,
+    subsubcategory: leaf.subsubcategory,
     name: document.getElementById('mt-name').value.trim(),
     unit: document.getElementById('mt-unit').value.trim(),
     rate: document.getElementById('mt-rate').value,
