@@ -195,7 +195,6 @@
   .sched-bar.vs-grey{background:var(--vs-grey);}
   .sched-bar.vs-purple{background:var(--vs-purple);}
   .sched-bar.vs-orange{background:var(--vs-orange);}
-  .sched-bar.critical{outline:3px solid var(--accent);outline-offset:1px;}
   .sched-bar:active{cursor:grabbing;}
   .sched-bar-fill{position:absolute;left:0;top:0;bottom:0;background:rgba(255,255,255,.35);pointer-events:none;}
   .sched-bar-label{position:relative;z-index:1;}
@@ -723,13 +722,11 @@ function renderReviewView(){
   var pct = projectPct(pid);
   var delayed = delayedItems(pid);
   var spaces = spacesOf(pid);
-  var critical = computeCriticalPath(pid);
 
   var html = '<div class="stat-strip">'+
     statBox('Overall Complete', pct+'%','accent')+
     statBox('Spaces', spaces.length)+
     statBox('Delayed / Overdue Items', delayed.length, delayed.length? 'red':'')+
-    statBox('Critical Path Length', critical.length)+
     '</div>';
 
   html += '<div class="field-hint" style="margin-bottom:14px;">Click a trade chip on any space below to see what\'s delayed, why, and its original vs. current dates.</div>';
@@ -744,27 +741,17 @@ function renderReviewView(){
       '</div>';
   });
   html += '</div>';
-
-  if(critical.length){
-    html += '<div class="section-title">Critical Path <span style="font-weight:400;text-transform:none;letter-spacing:0;">— finish this chain first, or the whole project\'s finish date slips</span></div>';
-    html += '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;">'+critical.map(function(a,i){
-      var sp = STATE.data.spaces.filter(function(s){return s.SpaceID===a.SpaceID;})[0];
-      return (i>0?'<span style="color:var(--ink-soft);">&rarr;</span>':'')+
-        '<span class="status-chip vs-grey" style="cursor:pointer;box-shadow:0 0 0 2px var(--accent) inset;" onclick="openActivityDetailModal(\''+a.ActivityID+'\')">'+escapeHtml((sp?sp.Name:'')+' — '+a.Agency)+'</span>';
-    }).join('')+'</div>';
-  }
   return html;
 }
 function statBox(label, value, tone){
   return '<div class="stat-box"><div class="label">'+label+'</div><div class="value '+(tone||'')+'">'+value+'</div></div>';
 }
-// One clickable chip per trade (agency) active in this space, colored by that
-// trade's actual Schedule activity — click through to see original vs.
-// current dates, delay reason, and critical-path status.
+// One clickable chip per trade (agency) active in this space, colored by
+// that trade's actual Schedule activity — click through to see original
+// vs. current dates and delay reason.
 function spaceActivityChips(pid, spaceId){
   var acts = activitiesOf(pid).filter(function(a){ return a.SpaceID===spaceId; });
   if(!acts.length) return '<div class="space-chip-row"><span style="font-size:12px;color:var(--ink-soft);">No tasks added to this space yet</span></div>';
-  var critical = computeCriticalPath(pid).map(function(a){return a.ActivityID;});
   var byCat = {}, catOrder = [];
   acts.forEach(function(a){
     var c = a.Category || '(Uncategorized)';
@@ -776,9 +763,8 @@ function spaceActivityChips(pid, spaceId){
     html += '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:var(--ink-soft);margin:6px 0 3px;">'+escapeHtml(cat)+'</div><div class="space-chip-row">';
     byCat[cat].forEach(function(a){
       var vis = deriveVisual(a.Status, a.OriginalEndDate, a.EndDate);
-      var isCritical = critical.indexOf(a.ActivityID)>-1;
-      html += '<span class="status-chip '+vis.cls+'" style="cursor:pointer;'+(isCritical?'box-shadow:0 0 0 2px var(--accent) inset;':'')+'" onclick="openActivityDetailModal(\''+a.ActivityID+'\')" title="Click for details">'+
-        '<span class="dot"></span>'+escapeHtml(a.Agency)+(isCritical?' &#9888;':'')+'</span>';
+      html += '<span class="status-chip '+vis.cls+'" style="cursor:pointer;" onclick="openActivityDetailModal(\''+a.ActivityID+'\')" title="Click for details">'+
+        '<span class="dot"></span>'+escapeHtml(a.Agency)+'</span>';
     });
     html += '</div>';
   });
@@ -884,7 +870,7 @@ function renderTrackerView(editable){
           '<span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:var(--ink-soft);">'+escapeHtml(a.Category)+'</span>'+
           '<span style="font-weight:700;font-size:13px;flex:1;min-width:120px;">'+escapeHtml(a.Agency)+'</span>'+
           '<span class="status-chip '+visA.cls+'"><span class="dot"></span>'+escapeHtml(a.Status)+'</span>'+
-          (STATE.role==='admin' ? '<button class="cat-remove-btn" title="Delete this task" onclick="deleteActivityPrompt(\''+a.ActivityID+'\',\''+jsAttr(a.Agency)+'\')">&times;</button>' : '')+
+          (STATE.role==='admin' ? '<button class="cat-remove-btn" style="font-size:22px;padding:0 6px;" title="Delete this task" onclick="deleteActivityPrompt(\''+a.ActivityID+'\',\''+jsAttr(a.Agency)+'\')">&times;</button>' : '')+
         '</div>';
       if(mats.length){
         html += '<div class="table-wrap" style="margin-top:8px;"><table class="tracker"><thead><tr><th>Material</th><th>Unit</th><th>Qty</th>';
@@ -1135,42 +1121,14 @@ var SCHED_PX_PER_DAY = 28;
 function activitiesOf(projectId){
   return STATE.data.activities.filter(function(a){ return a.ProjectID===projectId; });
 }
-// The critical path here is the longest chain of back-to-back (zero-slack)
-// predecessor -> successor activities ending at the project's latest finish.
-// Since activities already carry real scheduled dates (not just abstract
-// durations), "critical" reduces to: walk backward from whichever activity
-// finishes last, at each step only following a predecessor whose EndDate
-// exactly matches the successor's StartDate — a predecessor with any gap has
-// slack and isn't blocking anything.
-function computeCriticalPath(projectId){
-  var acts = activitiesOf(projectId);
-  if(!acts.length) return [];
-  var byId = {};
-  acts.forEach(function(a){ byId[a.ActivityID] = a; });
-  var tail = acts.reduce(function(best,a){ return (!best || a.EndDate>best.EndDate) ? a : best; }, null);
-  var chain = [tail];
-  var current = tail;
-  var guard = 0;
-  while(guard++ < acts.length){
-    var preds = (current.Predecessors||[]).map(function(p){ return byId[p.id]; }).filter(Boolean);
-    var zeroSlack = preds.filter(function(p){ return p.EndDate === current.StartDate; });
-    if(!zeroSlack.length) break;
-    zeroSlack.sort(function(a,b){ return b.EndDate>a.EndDate?1:-1; });
-    current = zeroSlack[0];
-    chain.push(current);
-  }
-  return chain.reverse();
-}
 function openActivityDetailModal(activityId){
   var act = STATE.data.activities.filter(function(a){return a.ActivityID===activityId;})[0];
   if(!act) return;
   var sp = STATE.data.spaces.filter(function(s){return s.SpaceID===act.SpaceID;})[0];
   var vis = deriveVisual(act.Status, act.OriginalEndDate, act.EndDate);
-  var isCritical = computeCriticalPath(STATE.currentProjectId).some(function(a){return a.ActivityID===activityId;});
 
   var body = '<h3>'+escapeHtml(act.Agency)+' &mdash; '+escapeHtml(sp?sp.Name:'')+'</h3>'+
     '<span class="status-chip '+vis.cls+'" style="margin-bottom:12px;">'+act.Status+(vis.delayed?' · Delayed':'')+'</span>'+
-    (isCritical ? '<div class="field-hint" style="color:var(--accent-dark);font-weight:600;margin:8px 0;">&#9888; On the critical path &mdash; this activity is currently the bottleneck for the whole project\'s finish date.</div>' : '')+
     '<div class="field-row" style="margin-top:10px;">'+
       '<div class="field"><label>Originally Planned</label><div style="font-size:13.5px;padding:6px 0;">'+fmtDate(act.OriginalStartDate)+' &rarr; '+fmtDate(act.OriginalEndDate)+'</div></div>'+
       '<div class="field"><label>Currently Scheduled</label><div style="font-size:13.5px;padding:6px 0;font-weight:700;">'+fmtDate(act.StartDate)+' &rarr; '+fmtDate(act.EndDate)+'</div></div>'+
@@ -1226,7 +1184,6 @@ function renderScheduleChart(pid, opts){
     header += '</div></div>';
   }
 
-  var critical = computeCriticalPath(pid).map(function(a){return a.ActivityID;});
   var body = '';
   spaces.forEach(function(sp){
     var rows = acts.filter(function(a){ return a.SpaceID===sp.SpaceID; });
@@ -1251,11 +1208,10 @@ function renderScheduleChart(pid, opts){
         var width = Math.max(dayDiff(a.StartDate, a.EndDate)*SCHED_PX_PER_DAY, 20);
         var pct = Math.max(0, Math.min(100, Number(a.PercentComplete)||0));
         var vis = deriveVisual(a.Status, a.OriginalEndDate, a.EndDate);
-        var isCritical = critical.indexOf(a.ActivityID)>-1;
         body += '<div class="sched-row">'+
-          '<div class="sched-row-label">'+escapeHtml(a.Agency)+(isCritical?' <span style="color:var(--accent-dark);font-weight:800;" title="On the critical path">&#9888;</span>':'')+'<div style="font-size:10.5px;color:var(--ink-soft);">'+fmtDate(a.StartDate)+' &rarr; '+fmtDate(a.EndDate)+'</div></div>'+
+          '<div class="sched-row-label">'+escapeHtml(a.Agency)+'<div style="font-size:10.5px;color:var(--ink-soft);">'+fmtDate(a.StartDate)+' &rarr; '+fmtDate(a.EndDate)+'</div></div>'+
           '<div class="sched-row-timeline" style="width:'+timelineWidth+'px;">'+
-            '<div class="sched-bar '+vis.cls+(isCritical?' critical':'')+'" data-activity-id="'+a.ActivityID+'" style="left:'+left+'px;width:'+width+'px;'+(opts.readOnly?'cursor:default;':'')+'" title="'+escapeHtml(a.Agency+': '+a.Status+' ('+pct+'%)'+(isCritical?' · critical path':''))+'">'+
+            '<div class="sched-bar '+vis.cls+'" data-activity-id="'+a.ActivityID+'" style="left:'+left+'px;width:'+width+'px;'+(opts.readOnly?'cursor:default;':'')+'" title="'+escapeHtml(a.Agency+': '+a.Status+' ('+pct+'%)')+'">'+
               '<div class="sched-bar-fill" style="width:'+pct+'%;"></div>'+
               '<span class="sched-bar-label">'+escapeHtml(a.Agency)+'</span>'+
               (opts.readOnly? '' : '<div class="sched-resize" data-activity-id="'+a.ActivityID+'"></div>')+
@@ -1965,7 +1921,6 @@ function renderReportView(){
   var pva = plannedVsActual(pid);
   var procurement = pendingProcurement(pid);
   var agencies = delayedAgencies(pid);
-  var critical = computeCriticalPath(pid);
   var weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate()-7);
   var completions = [];
   boqItemsOf(pid).forEach(function(r){
@@ -1995,8 +1950,7 @@ function renderReportView(){
 
   html += '<div class="stat-strip"><div class="stat-box"><div class="label">Delayed Items</div><div class="value '+(delayed.length?'red':'')+'">'+delayed.length+'</div></div>'+
     '<div class="stat-box"><div class="label">Pending Procurement</div><div class="value '+(procurement.length?'accent':'')+'">'+procurement.length+'</div></div>'+
-    '<div class="stat-box"><div class="label">Agencies Running Late</div><div class="value '+(agencies.length?'red':'')+'">'+agencies.length+'</div></div>'+
-    '<div class="stat-box"><div class="label">Critical Path Length</div><div class="value">'+critical.length+'</div></div></div>';
+    '<div class="stat-box"><div class="label">Agencies Running Late</div><div class="value '+(agencies.length?'red':'')+'">'+agencies.length+'</div></div></div>';
 
   html += '<div class="section-title">This Week\'s Completions</div>';
   html += completions.length ? '<ul class="plain">'+completions.map(function(c){return '<li>'+c+'</li>';}).join('')+'</ul>' : '<p style="color:var(--ink-soft);font-size:13px;">No stage completions logged in the last 7 days.</p>';
@@ -2015,13 +1969,6 @@ function renderReportView(){
   html += delayed.length ? '<ul class="plain">'+delayed.map(function(d){
       return '<li>'+escapeHtml(d.space)+' &mdash; '+escapeHtml(d.material)+' ('+escapeHtml(d.stage)+') &mdash; target was '+fmtDate(d.target)+(d.delayReason?' &mdash; '+escapeHtml(d.delayReason):'')+'</li>';
     }).join('')+'</ul>' : '<p style="color:var(--ink-soft);font-size:13px;">None &mdash; on track.</p>';
-
-  html += '<div class="section-title">Critical Path <span style="font-weight:400;text-transform:none;letter-spacing:0;">— finish this chain first, or the whole project\'s finish date slips</span></div>';
-  html += critical.length ? '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;">'+critical.map(function(a,i){
-      var sp = STATE.data.spaces.filter(function(s){return s.SpaceID===a.SpaceID;})[0];
-      return (i>0?'<span style="color:var(--ink-soft);">&rarr;</span>':'')+
-        '<span class="status-chip vs-grey" style="cursor:pointer;box-shadow:0 0 0 2px var(--accent) inset;" onclick="openActivityDetailModal(\''+a.ActivityID+'\')">'+escapeHtml((sp?sp.Name:'')+' — '+a.Agency)+'</span>';
-    }).join('')+'</div>' : '<p style="color:var(--ink-soft);font-size:13px;">No schedule activities yet.</p>';
 
   html += '</div>';
   return html;
