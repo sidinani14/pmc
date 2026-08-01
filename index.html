@@ -71,7 +71,12 @@
   /* ---------- Cards / grid ---------- */
   .grid-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px;}
   .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:16px;
-    box-shadow:var(--shadow);}
+    box-shadow:var(--shadow);position:relative;}
+  .space-delete-btn{position:absolute;top:8px;right:8px;width:24px;height:24px;border-radius:50%;
+    border:1px solid var(--line);background:#fff;color:var(--ink-soft);font-size:14px;font-weight:700;
+    cursor:pointer;opacity:0;transition:opacity .15s,color .15s,border-color .15s;line-height:1;}
+  .card:hover .space-delete-btn{opacity:1;}
+  .space-delete-btn:hover{color:#c0392b;border-color:#c0392b;}
   .proj-card{cursor:pointer;transition:transform .12s, box-shadow .12s;}
   .proj-card:hover{transform:translateY(-2px);box-shadow:0 6px 20px rgba(28,33,40,.1);}
   .proj-card .pct-row{display:flex;align-items:center;gap:10px;margin:10px 0 8px;}
@@ -731,7 +736,9 @@ function renderReviewView(){
   html += '<div class="section-title">By Space</div><div class="grid-cards">';
   spaces.forEach(function(s){
     var p = spacePct(pid, s.SpaceID);
-    html += '<div class="card"><h3>'+escapeHtml(s.Name)+'</h3>'+
+    html += '<div class="card">'+
+      '<button class="space-delete-btn" title="Delete space" onclick="deleteSpacePrompt(\''+s.SpaceID+'\',\''+jsAttr(s.Name)+'\',this)">&times;</button>'+
+      '<h3>'+escapeHtml(s.Name)+'</h3>'+
       '<div class="pct-row"><div class="pct-bar"><div style="width:'+p+'%"></div></div><div class="pct-num">'+p+'%</div></div>'+
       spaceActivityChips(pid, s.SpaceID) +
       '</div>';
